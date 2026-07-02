@@ -2,6 +2,7 @@ import QtQuick          2.12
 import QtQuick.Controls 2.4
 import QtQuick.Dialogs  1.3
 import QtQuick.Layouts  1.11
+import Qt.labs.settings 1.0
 
 import QGroundControl               1.0
 import QGroundControl.Controls      1.0
@@ -12,21 +13,67 @@ Item {
     id: root
 
     property bool expanded: false
+    property bool settingsOpen: false
+    property bool agentRequestRunning: false
+    property bool _bubbleHovered: false
+    property bool _panelHovered: false
     property var vehicles: QGroundControl.multiVehicleManager.vehicles
     property var activeVehicle: QGroundControl.multiVehicleManager.activeVehicle
     property var pendingIntent: null
     property string pendingSummary: ""
+    property real minPanelWidth: Math.min(380, parent ? parent.width * 0.82 : 380)
+    property real maxPanelWidth: parent ? Math.max(minPanelWidth, Math.min(parent.width * 0.48, 620)) : 520
+    property real panelWidth: Math.min(maxPanelWidth, Math.max(minPanelWidth, assistantSettings.panelWidth))
+    readonly property string _agentGuide:
+        "推荐部署方式：在地面站本机启动一个外部 Agent HTTP 服务，面板只把文本、飞行器摘要和最近消息发给该服务；服务内部再调用 OpenAI/本地大模型/MCP 工具，返回 reply 或受控 intent。飞行动作 intent 必须经过本面板白名单和人工确认后才会调用 Vehicle 接口。\n\n" +
+        "默认接口：POST /merivus/agent\n" +
+        "请求字段：message、model、fleet、history\n" +
+        "响应字段：reply、intent。intent.action 仅允许 takeoff、land、rtl、pause。"
 
     anchors.fill: parent
     z: QGroundControl.zOrderTopMost + 20
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
+    Settings {
+        id: assistantSettings
+        category: "MerivusAIAssistant"
+
+        property real panelWidth: 468
+        property bool agentEnabled: false
+        property string agentEndpoint: "http://127.0.0.1:8765/merivus/agent"
+        property string agentModel: "gpt-4.1-mini"
+        property int maxMessages: 80
+    }
+
     function tr(text) { return qsTr(text) }
+
+    function clamp(value, minValue, maxValue) {
+        return Math.max(minValue, Math.min(maxValue, value))
+    }
 
     function appendMessage(role, text) {
         chatModel.append({ role: role, text: text })
-        chatList.positionViewAtEnd()
+        trimHistory()
+        Qt.callLater(function() { chatList.positionViewAtEnd() })
+    }
+
+    function trimHistory() {
+        var limit = Math.max(12, assistantSettings.maxMessages)
+        while (chatModel.count > limit) {
+            chatModel.remove(1)
+        }
+    }
+
+    function clearChatHistory() {
+        chatModel.clear()
+        chatModel.append({
+            role: "assistant",
+            text: tr("你好，我可以协助查看飞行器状态、解释参数，并把起飞/降落/返航/暂停转换为待确认命令。")
+        })
+        pendingIntent = null
+        pendingSummary = ""
+        Qt.callLater(function() { chatList.positionViewAtEnd() })
     }
 
     function vehicleById(vehicleId) {
@@ -54,8 +101,10 @@ Item {
 
     function normalizeIds(ids) {
         var result = []
+        if (!ids) return result
         for (var i = 0; i < ids.length; i++) {
-            if (result.indexOf(ids[i]) === -1) result.push(ids[i])
+            var id = parseInt(ids[i])
+            if (!isNaN(id) && result.indexOf(id) === -1) result.push(id)
         }
         return result
     }
@@ -94,7 +143,7 @@ Item {
         if (!match) return 10
         var altitude = parseFloat(match[1])
         if (isNaN(altitude)) return 10
-        return Math.max(1, Math.min(120, altitude))
+        return clamp(altitude, 1, 120)
     }
 
     function vehicleSummary(vehicle) {
@@ -120,6 +169,7 @@ Item {
     }
 
     function buildIntent(action, ids, altitude) {
+        ids = normalizeIds(ids)
         if (!ids || ids.length === 0) {
             appendMessage("assistant", tr("没有可用飞行器。请先连接飞控，或明确指定 UAV 编号。"))
             return null
@@ -147,7 +197,7 @@ Item {
                                                         : tr("%1 架飞行器（%2）").arg(intent.vehicleIds.length).arg(intent.vehicleIds.join(", "))
         pendingIntent = intent
         pendingSummary = intent.action === "takeoff"
-                       ? tr("准备让 %1 起飞到 %2 米。").arg(targetText).arg(intent.altitude.toFixed(1))
+                       ? tr("准备让 %1 起飞到 %2 米。").arg(targetText).arg(Number(intent.altitude).toFixed(1))
                        : tr("准备让 %1 执行%2。").arg(targetText).arg(intent.title)
         appendMessage("assistant", pendingSummary + "\n" + tr("请在面板内确认后再下发。"))
     }
@@ -190,73 +240,213 @@ Item {
         pendingSummary = ""
     }
 
-    function handleUserText(text) {
-        var clean = text.trim()
-        if (clean.length === 0) return
-        appendMessage("user", clean)
+    function routeLocalText(clean) {
+        if (/清空|清除|删除.*历史|clear/i.test(clean)) {
+            clearChatHistory()
+            appendMessage("assistant", tr("已清空当前会话记录。"))
+            return true
+        }
+
+        if (/智能体|大模型|agent|llm|mcp|部署/i.test(clean)) {
+            appendMessage("assistant", _agentGuide)
+            return true
+        }
 
         if (/帮助|help|怎么用/i.test(clean)) {
-            appendMessage("assistant", tr("我可以做基础问答和快捷指令：例如“1号起飞10米”“2号降落”“全部返航”“查看飞行器状态”。涉及飞行动作时，我会先生成待确认命令。"))
-            return
+            appendMessage("assistant", tr("我可以做基础问答和快捷指令：例如“1号起飞10米”“2号降落”“全部返航”“查看飞行器状态”。涉及飞行动作时，我会先生成待确认命令。打开配置后可接入本机 Agent 服务。"))
+            return true
         }
 
         if (/状态|在线|电量|高度|status|list/i.test(clean)) {
             appendMessage("assistant", describeFleet())
-            return
+            return true
         }
 
         if (/参数|parameter|说明/i.test(clean)) {
             appendMessage("assistant", tr("参数页面已增加鼠标悬停说明卡片，会直接读取 PX4/APM 参数元数据中的短说明、长说明、单位、范围和默认值。"))
-            return
+            return true
         }
 
         var ids = parseVehicleIds(clean)
         if (/起飞|take\s*off|takeoff/i.test(clean)) {
             prepareIntent(buildIntent("takeoff", ids, parseAltitude(clean)))
+            return true
         } else if (/降落|着陆|land/i.test(clean)) {
             prepareIntent(buildIntent("land", ids, 0))
+            return true
         } else if (/返航|rtl|return/i.test(clean)) {
             prepareIntent(buildIntent("rtl", ids, 0))
+            return true
         } else if (/暂停|悬停|pause|hold/i.test(clean)) {
             prepareIntent(buildIntent("pause", ids, 0))
+            return true
+        }
+
+        return false
+    }
+
+    function chatHistoryForAgent() {
+        var history = []
+        var start = Math.max(0, chatModel.count - 18)
+        for (var i = start; i < chatModel.count; i++) {
+            var item = chatModel.get(i)
+            history.push({ role: item.role, content: item.text })
+        }
+        return history
+    }
+
+    function handleAgentIntent(intent) {
+        if (!intent || !intent.action) return false
+        var action = String(intent.action).toLowerCase()
+        if (["takeoff", "land", "rtl", "pause"].indexOf(action) === -1) return false
+        var ids = normalizeIds(intent.vehicleIds || intent.ids || defaultVehicleIds())
+        var altitude = action === "takeoff" ? clamp(Number(intent.altitude || 10), 1, 120) : 0
+        prepareIntent(buildIntent(action, ids, altitude))
+        return true
+    }
+
+    function callAgent(clean) {
+        if (agentRequestRunning) return
+        agentRequestRunning = true
+        appendMessage("assistant", tr("正在发送给本机 Agent：%1").arg(assistantSettings.agentEndpoint))
+
+        var xhr = new XMLHttpRequest()
+        xhr.open("POST", assistantSettings.agentEndpoint)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            agentRequestRunning = false
+
+            if (xhr.status < 200 || xhr.status >= 300) {
+                appendMessage("assistant", tr("Agent 暂不可用（HTTP %1）。已保留本地规则模式，可先使用状态查询和快捷命令。").arg(xhr.status))
+                return
+            }
+
+            try {
+                var data = JSON.parse(xhr.responseText)
+                if (data.reply) appendMessage("assistant", data.reply)
+                if (data.intent) handleAgentIntent(data.intent)
+                if (!data.reply && !data.intent) {
+                    appendMessage("assistant", tr("Agent 已响应，但没有返回 reply 或 intent 字段。"))
+                }
+            } catch (e) {
+                appendMessage("assistant", tr("Agent 响应不是有效 JSON：%1").arg(e))
+            }
+        }
+
+        xhr.onerror = function() {
+            agentRequestRunning = false
+            appendMessage("assistant", tr("无法连接 Agent 服务。请确认本机服务已启动，或关闭“启用外部 Agent”。"))
+        }
+
+        xhr.send(JSON.stringify({
+            message: clean,
+            model: assistantSettings.agentModel,
+            fleet: describeFleet(),
+            history: chatHistoryForAgent()
+        }))
+    }
+
+    function handleUserText(text) {
+        var clean = text.trim()
+        if (clean.length === 0) return
+        appendMessage("user", clean)
+
+        if (routeLocalText(clean)) return
+
+        if (assistantSettings.agentEnabled) {
+            callAgent(clean)
         } else {
-            appendMessage("assistant", tr("当前版本先支持状态查询、参数说明提示，以及起飞/降落/返航/暂停快捷命令。复杂坐标和航线操作建议继续使用地图交互。"))
+            appendMessage("assistant", tr("当前使用本地规则模式：支持状态查询、参数说明提示，以及起飞/降落/返航/暂停快捷命令。复杂坐标和航线操作建议继续使用地图交互；需要大模型能力时可在右上角配置中启用外部 Agent。"))
         }
     }
 
     Rectangle {
         id: assistantPanel
         anchors.top: parent.top
-        anchors.topMargin: mainWindow.header ? mainWindow.header.height + 8 : 8
+        anchors.topMargin: mainWindow.header && mainWindow.header.visible ? mainWindow.header.height + 4 : 8
         anchors.right: parent.right
-        anchors.rightMargin: 10
+        anchors.rightMargin: 8
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 10
-        width: Math.min(390, Math.max(320, parent.width * 0.24))
+        anchors.bottomMargin: 6
+        width: root.panelWidth
         radius: 8
-        color: Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, 0.97)
-        border.color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.18)
+        color: Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, _panelHovered ? 0.98 : 0.94)
+        border.color: _panelHovered ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.24)
+        border.width: _panelHovered ? 2 : 1
         visible: root.expanded
         clip: true
 
+        Behavior on width { NumberAnimation { duration: resizeHandle.pressed ? 0 : 120 } }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root._panelHovered = true
+            onExited: root._panelHovered = false
+        }
+
+        Rectangle {
+            id: resizeRail
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 6
+            color: resizeHandle.containsMouse || resizeHandle.drag.active ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.14)
+            opacity: resizeHandle.containsMouse || resizeHandle.drag.active ? 0.95 : 0.55
+            z: 4
+        }
+
+        MouseArea {
+            id: resizeHandle
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 14
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+
+            property real startX: 0
+            property real startWidth: 0
+
+            onPressed: {
+                startX = mouse.x
+                startWidth = assistantSettings.panelWidth
+            }
+            onPositionChanged: {
+                if (pressed) {
+                    var delta = startX - mouse.x
+                    assistantSettings.panelWidth = root.clamp(startWidth + delta, root.minPanelWidth, root.maxPanelWidth)
+                }
+            }
+        }
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 10
+            anchors.leftMargin: 14
+            anchors.rightMargin: 10
+            anchors.topMargin: 10
+            anchors.bottomMargin: 10
             spacing: 8
 
             RowLayout {
                 Layout.fillWidth: true
 
                 Rectangle {
-                    Layout.preferredWidth: 30
-                    Layout.preferredHeight: 30
-                    radius: 15
-                    color: qgcPal.buttonHighlight
-                    QGCLabel {
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 34
+                    radius: 17
+                    color: Qt.rgba(qgcPal.buttonHighlight.r, qgcPal.buttonHighlight.g, qgcPal.buttonHighlight.b, 0.20)
+                    border.color: qgcPal.buttonHighlight
+                    border.width: 1
+
+                    QGCColoredImage {
                         anchors.centerIn: parent
-                        text: "AI"
-                        color: qgcPal.buttonHighlightText
-                        font.bold: true
+                        width: 24
+                        height: 24
+                        source: "qrc:/qml/QGroundControl/FlightDisplay/ai-nine-star.svg"
+                        color: qgcPal.buttonHighlight
                     }
                 }
 
@@ -272,15 +462,25 @@ Item {
                     }
                     QGCLabel {
                         Layout.fillWidth: true
-                        text: vehicles ? tr("%1 架飞行器在线").arg(vehicles.count) : tr("未连接飞行器")
+                        text: vehicles ? tr("%1 架飞行器在线 · %2")
+                                         .arg(vehicles.count)
+                                         .arg(assistantSettings.agentEnabled ? tr("Agent") : tr("本地规则"))
+                                       : tr("未连接飞行器 · %1").arg(assistantSettings.agentEnabled ? tr("Agent") : tr("本地规则"))
                         font.pixelSize: 11
                         color: qgcPal.colorGrey
                     }
                 }
 
                 QGCButton {
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 26
+                    Layout.preferredWidth: 54
+                    Layout.preferredHeight: 28
+                    text: root.settingsOpen ? tr("聊天") : tr("配置")
+                    onClicked: root.settingsOpen = !root.settingsOpen
+                }
+
+                QGCButton {
+                    Layout.preferredWidth: 32
+                    Layout.preferredHeight: 28
                     text: "×"
                     onClicked: root.expanded = false
                 }
@@ -290,6 +490,86 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
                 color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.12)
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.settingsOpen ? 218 : 0
+                visible: root.settingsOpen
+                radius: 7
+                color: Qt.rgba(qgcPal.windowShade.r, qgcPal.windowShade.g, qgcPal.windowShade.b, 0.88)
+                border.color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.12)
+                clip: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 7
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCCheckBox {
+                            id: agentSwitch
+                            text: tr("启用外部 Agent")
+                            checked: assistantSettings.agentEnabled
+                            onClicked: assistantSettings.agentEnabled = checked
+                        }
+                        QGCLabel {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            text: agentRequestRunning ? tr("请求中") : tr("白名单确认执行")
+                            color: agentRequestRunning ? qgcPal.colorOrange : qgcPal.colorGrey
+                            font.pixelSize: 11
+                        }
+                    }
+
+                    QGCTextField {
+                        Layout.fillWidth: true
+                        text: assistantSettings.agentEndpoint
+                        placeholderText: tr("Agent HTTP 端点")
+                        onEditingFinished: assistantSettings.agentEndpoint = text
+                    }
+
+                    QGCTextField {
+                        Layout.fillWidth: true
+                        text: assistantSettings.agentModel
+                        placeholderText: tr("模型名称")
+                        onEditingFinished: assistantSettings.agentModel = text
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCLabel {
+                            Layout.fillWidth: true
+                            text: tr("消息保留：%1 条").arg(assistantSettings.maxMessages)
+                            color: qgcPal.text
+                        }
+                        QGCButton {
+                            Layout.preferredWidth: 32
+                            text: "-"
+                            onClicked: assistantSettings.maxMessages = Math.max(20, assistantSettings.maxMessages - 20)
+                        }
+                        QGCButton {
+                            Layout.preferredWidth: 32
+                            text: "+"
+                            onClicked: assistantSettings.maxMessages = Math.min(200, assistantSettings.maxMessages + 20)
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCButton {
+                            Layout.fillWidth: true
+                            text: tr("清空历史")
+                            onClicked: root.clearChatHistory()
+                        }
+                        QGCButton {
+                            Layout.fillWidth: true
+                            text: tr("生成接入说明")
+                            onClicked: root.appendMessage("assistant", root._agentGuide)
+                        }
+                    }
+                }
             }
 
             ListView {
@@ -312,12 +592,12 @@ Item {
 
                     Rectangle {
                         id: bubble
-                        width: Math.min(parent.width * 0.86, messageText.implicitWidth + 22)
+                        width: Math.min(parent.width * 0.88, Math.max(92, messageText.implicitWidth + 22))
                         implicitHeight: messageText.implicitHeight + 16
-                        x: role === "user" ? parent.width - width : 0
+                        x: model.role === "user" ? parent.width - width : 0
                         radius: 8
-                        color: role === "user" ? Qt.rgba(qgcPal.buttonHighlight.r, qgcPal.buttonHighlight.g, qgcPal.buttonHighlight.b, 0.95)
-                                               : qgcPal.windowShade
+                        color: model.role === "user" ? Qt.rgba(qgcPal.buttonHighlight.r, qgcPal.buttonHighlight.g, qgcPal.buttonHighlight.b, 0.95)
+                                                     : qgcPal.windowShade
                         border.color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.10)
 
                         QGCLabel {
@@ -328,7 +608,7 @@ Item {
                             anchors.margins: 8
                             text: model.text
                             wrapMode: Text.WordWrap
-                            color: role === "user" ? qgcPal.buttonHighlightText : qgcPal.text
+                            color: model.role === "user" ? qgcPal.buttonHighlightText : qgcPal.text
                             font.pixelSize: 12
                         }
                     }
@@ -337,7 +617,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: pendingIntent !== null ? 74 : 0
+                Layout.preferredHeight: pendingIntent !== null ? 76 : 0
                 visible: pendingIntent !== null
                 radius: 7
                 color: Qt.rgba(qgcPal.buttonHighlight.r, qgcPal.buttonHighlight.g, qgcPal.buttonHighlight.b, 0.12)
@@ -390,7 +670,8 @@ Item {
                 QGCTextField {
                     id: inputField
                     Layout.fillWidth: true
-                    placeholderText: tr("输入指令或问题")
+                    placeholderText: agentRequestRunning ? tr("等待 Agent 响应...") : tr("输入指令或问题")
+                    enabled: !agentRequestRunning
                     onAccepted: {
                         root.handleUserText(text)
                         text = ""
@@ -398,6 +679,7 @@ Item {
                 }
                 QGCButton {
                     text: tr("发送")
+                    enabled: !agentRequestRunning
                     onClicked: {
                         root.handleUserText(inputField.text)
                         inputField.text = ""
@@ -410,29 +692,35 @@ Item {
     Rectangle {
         id: bubbleButton
         anchors.right: parent.right
-        anchors.rightMargin: 18
+        anchors.rightMargin: root._bubbleHovered ? 18 : 8
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 18
-        width: 52
-        height: 52
-        radius: 26
+        anchors.bottomMargin: root._bubbleHovered ? 18 : 12
+        width: root._bubbleHovered ? 56 : 48
+        height: width
+        radius: width / 2
         visible: !root.expanded
-        color: qgcPal.buttonHighlight
-        border.color: Qt.rgba(qgcPal.buttonHighlightText.r, qgcPal.buttonHighlightText.g, qgcPal.buttonHighlightText.b, 0.50)
-        border.width: 1
+        opacity: root._bubbleHovered ? 1.0 : 0.48
+        color: root._bubbleHovered ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, 0.76)
+        border.color: root._bubbleHovered ? qgcPal.buttonHighlightText : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.40)
+        border.width: root._bubbleHovered ? 2 : 1
 
-        QGCLabel {
+        Behavior on opacity { NumberAnimation { duration: 140 } }
+        Behavior on width { NumberAnimation { duration: 140 } }
+
+        QGCColoredImage {
             anchors.centerIn: parent
-            text: "AI"
-            color: qgcPal.buttonHighlightText
-            font.bold: true
-            font.pixelSize: 16
+            width: parent.width * 0.58
+            height: width
+            source: "qrc:/qml/QGroundControl/FlightDisplay/ai-nine-star.svg"
+            color: root._bubbleHovered ? qgcPal.buttonHighlightText : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.72)
         }
 
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
+            onEntered: root._bubbleHovered = true
+            onExited: root._bubbleHovered = false
             onClicked: root.expanded = true
         }
 
