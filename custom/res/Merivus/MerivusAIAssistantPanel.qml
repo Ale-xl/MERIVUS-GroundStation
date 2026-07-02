@@ -21,9 +21,16 @@ Item {
     property var activeVehicle: QGroundControl.multiVehicleManager.activeVehicle
     property var pendingIntent: null
     property string pendingSummary: ""
-    property real minPanelWidth: Math.min(380, parent ? parent.width * 0.82 : 380)
-    property real maxPanelWidth: parent ? Math.max(minPanelWidth, Math.min(parent.width * 0.48, 620)) : 520
-    property real panelWidth: Math.min(maxPanelWidth, Math.max(minPanelWidth, assistantSettings.panelWidth))
+    property real headerOffset: mainWindow.header && mainWindow.header.visible ? mainWindow.header.height + 6 : 8
+    property real availablePanelHeight: parent ? Math.max(340, parent.height - headerOffset - 10) : 760
+    property real minPanelWidth: Math.min(390, parent ? parent.width * 0.82 : 390)
+    property real maxPanelWidth: parent ? Math.max(minPanelWidth, Math.min(parent.width * 0.46, 620)) : 520
+    property real minPanelHeight: Math.min(440, availablePanelHeight)
+    property real maxPanelHeight: Math.max(minPanelHeight, availablePanelHeight)
+    property real panelWidth: clamp(assistantSettings.panelWidth, minPanelWidth, maxPanelWidth)
+    property real panelHeight: clamp(assistantSettings.panelHeight, minPanelHeight, maxPanelHeight)
+    property real panelTopMargin: clamp(assistantSettings.panelTopMargin, headerOffset,
+                                        parent ? Math.max(headerOffset, parent.height - panelHeight - 8) : headerOffset)
     readonly property string _agentGuide:
         "推荐部署方式：在地面站本机启动一个外部 Agent HTTP 服务，面板只把文本、飞行器摘要和最近消息发给该服务；服务内部再调用 OpenAI/本地大模型/MCP 工具，返回 reply 或受控 intent。飞行动作 intent 必须经过本面板白名单和人工确认后才会调用 Vehicle 接口。\n\n" +
         "默认接口：POST /merivus/agent\n" +
@@ -39,17 +46,38 @@ Item {
         id: assistantSettings
         category: "MerivusAIAssistant"
 
-        property real panelWidth: 468
+        property real panelWidth: 448
+        property real panelHeight: 760
+        property real panelTopMargin: 112
+        property int layoutVersion: 0
         property bool agentEnabled: false
         property string agentEndpoint: "http://127.0.0.1:8765/merivus/agent"
         property string agentModel: "gpt-4.1-mini"
         property int maxMessages: 80
     }
 
+    Component.onCompleted: Qt.callLater(resetPanelLayoutIfNeeded)
+
+    onAvailablePanelHeightChanged: {
+        assistantSettings.panelHeight = clamp(assistantSettings.panelHeight, minPanelHeight, maxPanelHeight)
+        assistantSettings.panelTopMargin = clamp(assistantSettings.panelTopMargin, headerOffset,
+                                                 parent ? Math.max(headerOffset, parent.height - panelHeight - 8) : headerOffset)
+    }
+
     function tr(text) { return qsTr(text) }
 
     function clamp(value, minValue, maxValue) {
         return Math.max(minValue, Math.min(maxValue, value))
+    }
+
+    function resetPanelLayoutIfNeeded() {
+        if (!parent || parent.height <= 0) return
+        if (assistantSettings.layoutVersion < 3) {
+            assistantSettings.panelWidth = clamp(parent.width * 0.235, minPanelWidth, maxPanelWidth)
+            assistantSettings.panelHeight = maxPanelHeight
+            assistantSettings.panelTopMargin = headerOffset
+            assistantSettings.layoutVersion = 3
+        }
     }
 
     function appendMessage(role, text) {
@@ -364,12 +392,11 @@ Item {
     Rectangle {
         id: assistantPanel
         anchors.top: parent.top
-        anchors.topMargin: mainWindow.header && mainWindow.header.visible ? mainWindow.header.height + 4 : 8
+        anchors.topMargin: root.panelTopMargin
         anchors.right: parent.right
         anchors.rightMargin: 8
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 6
         width: root.panelWidth
+        height: root.panelHeight
         radius: 8
         color: Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, _panelHovered ? 0.98 : 0.94)
         border.color: _panelHovered ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.24)
@@ -377,7 +404,8 @@ Item {
         visible: root.expanded
         clip: true
 
-        Behavior on width { NumberAnimation { duration: resizeHandle.pressed ? 0 : 120 } }
+        Behavior on width { NumberAnimation { duration: resizeLeftHandle.pressed ? 0 : 120 } }
+        Behavior on height { NumberAnimation { duration: resizeTopHandle.pressed || resizeBottomHandle.pressed ? 0 : 120 } }
 
         MouseArea {
             anchors.fill: parent
@@ -393,13 +421,33 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 6
-            color: resizeHandle.containsMouse || resizeHandle.drag.active ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.14)
-            opacity: resizeHandle.containsMouse || resizeHandle.drag.active ? 0.95 : 0.55
+            color: resizeLeftHandle.containsMouse || resizeLeftHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.14)
+            opacity: resizeLeftHandle.containsMouse || resizeLeftHandle.pressed ? 0.95 : 0.55
+            z: 4
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 6
+            color: resizeTopHandle.containsMouse || resizeTopHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.10)
+            opacity: resizeTopHandle.containsMouse || resizeTopHandle.pressed ? 0.95 : 0.0
+            z: 4
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 6
+            color: resizeBottomHandle.containsMouse || resizeBottomHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.10)
+            opacity: resizeBottomHandle.containsMouse || resizeBottomHandle.pressed ? 0.95 : 0.0
             z: 4
         }
 
         MouseArea {
-            id: resizeHandle
+            id: resizeLeftHandle
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -418,6 +466,62 @@ Item {
                 if (pressed) {
                     var delta = startX - mouse.x
                     assistantSettings.panelWidth = root.clamp(startWidth + delta, root.minPanelWidth, root.maxPanelWidth)
+                }
+            }
+        }
+
+        MouseArea {
+            id: resizeTopHandle
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 14
+            hoverEnabled: true
+            cursorShape: Qt.SizeVerCursor
+            z: 5
+
+            property real startY: 0
+            property real startHeight: 0
+            property real startTop: 0
+
+            onPressed: {
+                startY = mouse.y
+                startHeight = assistantSettings.panelHeight
+                startTop = assistantSettings.panelTopMargin
+            }
+            onPositionChanged: {
+                if (!pressed || !parent.parent) return
+                var delta = mouse.y - startY
+                var bottom = startTop + startHeight
+                var newTop = root.clamp(startTop + delta, root.headerOffset,
+                                        Math.max(root.headerOffset, bottom - root.minPanelHeight))
+                var newHeight = root.clamp(bottom - newTop, root.minPanelHeight, root.maxPanelHeight)
+                assistantSettings.panelTopMargin = newTop
+                assistantSettings.panelHeight = newHeight
+            }
+        }
+
+        MouseArea {
+            id: resizeBottomHandle
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 14
+            hoverEnabled: true
+            cursorShape: Qt.SizeVerCursor
+            z: 5
+
+            property real startY: 0
+            property real startHeight: 0
+
+            onPressed: {
+                startY = mouse.y
+                startHeight = assistantSettings.panelHeight
+            }
+            onPositionChanged: {
+                if (pressed) {
+                    var delta = mouse.y - startY
+                    assistantSettings.panelHeight = root.clamp(startHeight + delta, root.minPanelHeight, root.maxPanelHeight)
                 }
             }
         }
@@ -648,19 +752,6 @@ Item {
                             text: tr("取消")
                             onClicked: root.cancelPendingIntent()
                         }
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 5
-                Repeater {
-                    model: [ tr("状态"), tr("1号起飞10米"), tr("降落"), tr("返航") ]
-                    QGCButton {
-                        Layout.fillWidth: true
-                        text: modelData
-                        onClicked: root.handleUserText(modelData)
                     }
                 }
             }
