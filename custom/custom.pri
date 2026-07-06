@@ -31,14 +31,17 @@ QML_IMPORT_PATH += \
 
 SOURCES += \
     $$PWD/src/CustomPlugin.cc \
+    $$PWD/src/Diagnostics/MerivusLinkDiagnostics.cc \
     $$PWD/src/Swarm/SwarmController.cc
 
 HEADERS += \
     $$PWD/src/CustomPlugin.h \
+    $$PWD/src/Diagnostics/MerivusLinkDiagnostics.h \
     $$PWD/src/Swarm/SwarmController.h
 
 INCLUDEPATH += \
     $$PWD/src \
+    $$PWD/src/Diagnostics \
     $$PWD/src/Swarm
 
 # Keep MSVC builds from failing on non-ASCII comments in upstream/source files.

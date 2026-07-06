@@ -59,6 +59,8 @@
 
 建议分支：`test/current-link-baseline`
 
+状态：completed
+
 任务：
 
 - 记录当前 TCP Link 配置方式。
