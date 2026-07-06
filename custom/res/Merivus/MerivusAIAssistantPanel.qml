@@ -32,7 +32,7 @@ Item {
     property real panelTopMargin: clamp(assistantSettings.panelTopMargin, headerOffset,
                                         parent ? Math.max(headerOffset, parent.height - panelHeight - 8) : headerOffset)
     readonly property string _agentGuide:
-        "推荐部署方式：在地面站本机启动一个外部 Agent HTTP 服务，面板只把文本、飞行器摘要和最近消息发给该服务；服务内部再调用 OpenAI/本地大模型/MCP 工具，返回 reply 或受控 intent。飞行动作 intent 必须经过本面板白名单和人工确认后才会调用 Vehicle 接口。\n\n" +
+        "推荐部署方式：在地面站本机启动一个外部 Agent HTTP 服务，面板只把文本、飞行器摘要和最近消息发给该服务；服务内部再调用 OpenAI/本地大模型/MCP 工具，返回 reply 或受控 intent。当前安全封锁分支只允许飞行动作 intent 生成未执行建议，不调用 Vehicle 接口。\n\n" +
         "默认接口：POST /merivus/agent\n" +
         "请求字段：message、model、fleet、history\n" +
         "响应字段：reply、intent。intent.action 仅允许 takeoff、land、rtl、pause。"
@@ -51,6 +51,7 @@ Item {
         property real panelTopMargin: 112
         property int layoutVersion: 0
         property bool agentEnabled: false
+        property bool developerEnableAiFlightExecution: false
         property string agentEndpoint: "http://127.0.0.1:8765/merivus/agent"
         property string agentModel: "gpt-4.1-mini"
         property int maxMessages: 80
@@ -227,7 +228,7 @@ Item {
         pendingSummary = intent.action === "takeoff"
                        ? tr("准备让 %1 起飞到 %2 米。").arg(targetText).arg(Number(intent.altitude).toFixed(1))
                        : tr("准备让 %1 执行%2。").arg(targetText).arg(intent.title)
-        appendMessage("assistant", pendingSummary + "\n" + tr("请在面板内确认后再下发。"))
+        appendMessage("assistant", pendingSummary + "\n" + tr("建议未执行：当前安全封锁默认不会下发飞行命令。"))
     }
 
     function executePendingIntent() {
@@ -236,29 +237,20 @@ Item {
         pendingIntent = null
         pendingSummary = ""
 
-        var results = []
-        for (var i = 0; i < intent.vehicleIds.length; i++) {
-            var vehicle = vehicleById(intent.vehicleIds[i])
-            if (!vehicle) {
-                results.push(tr("UAV-%1 不在线").arg(intent.vehicleIds[i]))
-                continue
-            }
+        var targetText = intent.vehicleIds.length === 1 ? tr("UAV-%1").arg(intent.vehicleIds[0])
+                                                        : tr("%1 架飞行器（%2）").arg(intent.vehicleIds.length).arg(intent.vehicleIds.join(", "))
+        var actionText = intent.action === "takeoff"
+                       ? tr("起飞到 %1 米").arg(Number(intent.altitude).toFixed(1))
+                       : intent.title
+        var flagText = assistantSettings.developerEnableAiFlightExecution
+                     ? tr("开发开关 developerEnableAiFlightExecution 已启用，但安全封锁分支不包含真实执行路径。")
+                     : tr("开发开关 developerEnableAiFlightExecution 默认关闭。")
 
-            if (intent.action === "takeoff") {
-                vehicle.guidedModeTakeoff(intent.altitude)
-                results.push(tr("UAV-%1 已发送起飞确认命令").arg(vehicle.id))
-            } else if (intent.action === "land") {
-                vehicle.guidedModeLand()
-                results.push(tr("UAV-%1 已发送降落命令").arg(vehicle.id))
-            } else if (intent.action === "rtl") {
-                vehicle.guidedModeRTL(false)
-                results.push(tr("UAV-%1 已发送返航命令").arg(vehicle.id))
-            } else if (intent.action === "pause") {
-                vehicle.pauseVehicle()
-                results.push(tr("UAV-%1 已发送暂停命令").arg(vehicle.id))
-            }
-        }
-        appendMessage("assistant", results.join("\n"))
+        appendMessage("assistant",
+                      tr("建议未执行：%1 可执行“%2”。\n%3\n请使用原生 QGC 人工控制入口，并按现场安全流程确认。")
+                      .arg(targetText)
+                      .arg(actionText)
+                      .arg(flagText))
     }
 
     function cancelPendingIntent() {
@@ -281,7 +273,7 @@ Item {
         }
 
         if (/帮助|help|怎么用/i.test(clean)) {
-            appendMessage("assistant", tr("我可以做基础问答和快捷指令：例如“1号起飞10米”“2号降落”“全部返航”“查看飞行器状态”。涉及飞行动作时，我会先生成待确认命令。打开配置后可接入本机 Agent 服务。"))
+            appendMessage("assistant", tr("我可以做基础问答和快捷指令：例如“1号起飞10米”“2号降落”“全部返航”“查看飞行器状态”。涉及飞行动作时，我只生成未执行建议。打开配置后可接入本机 Agent 服务。"))
             return true
         }
 
@@ -385,7 +377,7 @@ Item {
         if (assistantSettings.agentEnabled) {
             callAgent(clean)
         } else {
-            appendMessage("assistant", tr("当前使用本地规则模式：支持状态查询、参数说明提示，以及起飞/降落/返航/暂停快捷命令。复杂坐标和航线操作建议继续使用地图交互；需要大模型能力时可在右上角配置中启用外部 Agent。"))
+            appendMessage("assistant", tr("当前使用本地规则模式：支持状态查询、参数说明提示，以及起飞/降落/返航/暂停建议。复杂坐标和航线操作建议继续使用地图交互；需要大模型能力时可在右上角配置中启用外部 Agent。"))
         }
     }
 
@@ -744,7 +736,7 @@ Item {
                         Layout.fillWidth: true
                         QGCButton {
                             Layout.fillWidth: true
-                            text: tr("确认执行")
+                            text: tr("确认建议")
                             onClicked: root.executePendingIntent()
                         }
                         QGCButton {
