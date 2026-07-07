@@ -91,6 +91,14 @@ Qt*-linux*.tar.*
 .codex/
 AGENTS.md
 
+# Python local agent
+agent/.venv/
+agent/dist/
+agent/build/
+**/__pycache__/
+*.pyc
+.env
+
 # Release signing credentials and store secrets
 *.keystore
 *.jks

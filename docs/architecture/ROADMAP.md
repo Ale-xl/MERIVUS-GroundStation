@@ -84,6 +84,8 @@
 
 建议分支：`feat/ai-panel-foundation`
 
+状态：当前已有 AI 面板基础 UI 和安全封锁；尚未作为独立整理分支完成。`feat/local-agent-http` 不修改该 UI。
+
 任务：
 
 - 整理现有 AI 面板状态。
@@ -106,14 +108,17 @@
 
 建议分支：`feat/local-agent-http`
 
+状态：completed
+
 任务：
 
 - 建立独立 `agent/` 目录。
 - 建立 Python/FastAPI 最小服务。
-- 提供 `/health` 和 `/merivus/agent`。
+- 提供 `/health`、`/merivus/info` 和 `/merivus/agent`。
 - 第一版返回 Mock JSON。
 - 定义请求和响应 JSON Schema。
 - Agent 不访问 MAVLink、PX4 或真实云模型。
+- 不修改 QGC C++ 网络客户端，不增加 QProcess，不接真实大模型。
 
 验收：
 
@@ -121,8 +126,11 @@
 - health 正常。
 - POST 返回固定 JSON。
 - 单元测试通过。
+- 高风险动作只返回 proposal，不执行、不声称成功。
+- capability 未授权时不生成 proposal。
+- `external_network_enabled=false`、`flight_execution_enabled=false`。
 
-依赖：阶段 2 的契约收敛。
+依赖：阶段 0、临时安全封锁、阶段 1。QGC UI 契约收敛将在阶段 4 继续处理。
 
 ## 阶段 4：QGC 与 Agent 通信
 

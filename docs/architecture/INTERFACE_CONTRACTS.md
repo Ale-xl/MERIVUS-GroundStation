@@ -1,17 +1,19 @@
 # MERIVUS 接口契约草案
 
-本文档定义阶段 0 的接口边界。除“从代码中确认”外，均为草案，需要在对应分支中实现和测试。
+本文档定义阶段 0 以来的接口边界。`feat/local-agent-http` 已实现独立 Python Mock Agent 的本机 HTTP 契约；QGC C++ 接入仍属于后续分支。
 
 ## QGC 到 Agent
 
 ### Endpoint
 
 ```text
+GET  http://127.0.0.1:8765/health
+GET  http://127.0.0.1:8765/merivus/info
 POST http://127.0.0.1:8765/merivus/agent
 Content-Type: application/json
 ```
 
-### 请求草案
+### 请求 Schema
 
 ```json
 {
@@ -34,7 +36,7 @@ Content-Type: application/json
 }
 ```
 
-### 响应草案
+### 响应 Schema
 
 ```json
 {
@@ -45,21 +47,41 @@ Content-Type: application/json
     "arguments": {
       "vehicle_id": 1
     },
-    "risk": "low",
-    "requires_confirmation": false,
     "summary": "查询一号无人机状态"
-  }
+  },
+  "provider": "mock",
+  "model": "mock-v1",
+  "status": "ok"
 }
 ```
 
 ### 契约规则
 
 - `proposal` 可以为 `null`。
-- QGC 不信任 Agent 返回的 `risk`，必须本地重算。
+- 本阶段 Agent 响应不包含 `risk` 和 `requires_confirmation`；QGC 后续必须本地重算风险和确认策略。
 - `command` 必须来自固定枚举。
 - 未知字段默认拒绝，JSON Schema 中尽量设置 `additionalProperties: false`。
 - 不允许返回原始 MAVLink 参数数组作为通用执行接口。
 - Agent 超时、离线、返回无效 JSON 时，QGC 只显示错误，不影响飞控主功能。
+- `proposal` 只是建议，不包含 `executed=true`、MAVLink 消息 ID、Shell 命令或 PX4 参数写入。
+
+## 本机 Agent 已实现接口
+
+`feat/local-agent-http` 新增独立 `agent/` 目录，当前只支持 `mock` Provider：
+
+- `GET /health`：返回服务状态，不调用 Provider、模型或外部网络。
+- `GET /merivus/info`：返回 `external_network_enabled=false`、`flight_execution_enabled=false`、`provider=mock`、`model=mock-v1`。
+- `POST /merivus/agent`：接收 `request_id/session_id/message/context/allowed_capabilities`，返回 `reply` 和可选 `proposal`。
+
+配置默认值：
+
+- `MERIVUS_AGENT_HOST=127.0.0.1`
+- `MERIVUS_AGENT_PORT=8765`
+- `MERIVUS_AGENT_PROVIDER=mock`
+- `MERIVUS_AGENT_LOG_LEVEL=INFO`
+- `MERIVUS_AGENT_MAX_MESSAGE_LENGTH=8000`
+
+本阶段不接 OpenAI、DeepSeek、Gemini、Ollama、MCP、GIS 真实服务、云服务器、数据库、MAVLink、Vehicle 或 SwarmController。
 
 ## 第一批允许 command
 
@@ -97,6 +119,8 @@ UI 操作：
 - `mavlink.send_raw`
 
 说明：这些可以作为未来高风险能力预留，但阶段 0/第一版 AI 不应直接实现执行。
+
+在 `feat/local-agent-http` 中，高风险 command 可作为 `proposal.command` 被 Mock Provider 识别，但前提是它出现在 `allowed_capabilities` 中；即便出现，也只返回结构化建议，不执行。
 
 ## QGC 本地策略接口
 
@@ -168,11 +192,12 @@ UI 操作：
 
 - 当前 AI 面板实际请求仍为 QML `XMLHttpRequest`，字段为 `message`、`model`、`fleet`、`history`。
 - 当前 AI 面板实际响应字段为 `reply`、`intent`，其中 `intent.action` 允许 `takeoff`、`land`、`rtl`、`pause`。
-- 当前实现与本文推荐的 `request_id/session_id/context/allowed_capabilities/proposal` 契约不一致，需要阶段 3/4/6 逐步迁移。
+- 当前 QGC UI 与本文推荐的 `request_id/session_id/context/allowed_capabilities/proposal` 契约不一致，需要在 `feat/qgc-agent-client` 及后续阶段逐步迁移。
+- 独立 Python Agent 已按新契约实现 Mock HTTP 服务，但尚未接入 QGC。
 
 ## 待确认事项
 
 - 是否保留兼容旧 `intent` 字段一段时间。
 - Agent 本机端口是否固定为 `8765`，还是允许用户配置。
-- 是否为本机 Agent 增加简单 token 或进程级来源校验。
+- 本机 Agent 已预留 `MERIVUS_LOCAL_TOKEN`，但正式随机会话 Token 需要 QGC 进程监管阶段实现。
 - 多机场景下 `vehicle_id` 与 PX4 `sysid` 的映射规则。
