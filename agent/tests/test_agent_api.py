@@ -134,3 +134,44 @@ def test_provider_exception_returns_safe_error():
         "request_id": "req-1",
     }
     assert "sensitive internal details" not in body["message"]
+
+
+def test_local_token_required_when_configured():
+    client = TestClient(create_app(AgentSettings(local_token="dev-secret")))
+
+    response = client.post("/merivus/agent", json=_payload())
+    body = response.json()
+
+    assert response.status_code == 401
+    assert body == {
+        "error_code": "unauthorized",
+        "message": "本机请求Token无效。",
+        "request_id": "req-1",
+    }
+
+
+def test_local_token_rejects_wrong_value():
+    client = TestClient(create_app(AgentSettings(local_token="dev-secret")))
+
+    response = client.post(
+        "/merivus/agent",
+        json=_payload(),
+        headers={"X-Merivus-Token": "wrong"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_local_token_accepts_correct_value():
+    client = TestClient(create_app(AgentSettings(local_token="dev-secret")))
+
+    response = client.post(
+        "/merivus/agent",
+        json=_payload(),
+        headers={"X-Merivus-Token": "dev-secret"},
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["request_id"] == "req-1"
+    assert body["status"] == "ok"

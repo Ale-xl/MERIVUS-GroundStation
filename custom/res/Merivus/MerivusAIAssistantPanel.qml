@@ -35,8 +35,10 @@ Item {
     property real panelHeight: clamp(assistantSettings.panelHeight, minPanelHeight, maxPanelHeight)
     property real panelTopMargin: clamp(assistantSettings.panelTopMargin, headerOffset,
                                         parent ? Math.max(headerOffset, parent.height - panelHeight - 8) : headerOffset)
+    readonly property bool agentCanSend: assistantSettings.agentEnabled && aiSupervisor.healthReady && !agentRequestRunning
     readonly property string _agentGuide:
-        "当前阶段使用本机 Mock Agent HTTP 服务，QML 只负责界面，HTTP 请求由 C++ AiAgentClient 发起。Agent 需要开发者手动启动，不接真实模型，不执行飞行动作。\n\n" +
+        "当前阶段使用本机 Mock Agent HTTP 服务，QML 只负责界面，C++ AiServiceSupervisor 负责本机Agent生命周期，AiAgentClient 负责HTTP请求。不接真实模型，不执行飞行动作。\n\n" +
+        "启动方式：发布包使用 applicationDirPath/agent/merivus-agent.exe；开发环境需显式配置 MERIVUS_AGENT_DEV_PYTHON 和 MERIVUS_AGENT_DEV_ROOT。\n" +
         "默认接口：GET /health、GET /merivus/info、POST /merivus/agent\n" +
         "请求字段：request_id、session_id、message、context、allowed_capabilities\n" +
         "响应字段：request_id、reply、proposal、provider、model、status。proposal 只显示为未执行建议。"
@@ -45,6 +47,39 @@ Item {
     z: QGroundControl.zOrderTopMost + 20
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
+
+    AiServiceSupervisor {
+        id: aiSupervisor
+        enabled: assistantSettings.agentEnabled
+
+        onAgentHealthy: {
+            aiAgentClient.checkHealth()
+            aiAgentClient.loadInfo()
+        }
+
+        onHealthReadyChanged: {
+            if (healthReady) {
+                aiAgentClient.checkHealth()
+                aiAgentClient.loadInfo()
+            }
+        }
+
+        onLocalTokenChanged: {
+            if (token && token.length > 0) {
+                aiAgentClient.setLocalToken(token)
+            } else {
+                aiAgentClient.clearLocalToken()
+            }
+        }
+
+        onStartFailed: {
+            root.appendMessage("assistant", tr("Agent启动失败：%1").arg(message))
+        }
+
+        onAgentCrashed: {
+            root.appendMessage("assistant", tr("Agent已崩溃，QGC主界面和飞控功能不会被阻塞。"))
+        }
+    }
 
     AiAgentClient {
         id: aiAgentClient
@@ -71,7 +106,7 @@ Item {
         property real panelHeight: 760
         property real panelTopMargin: 112
         property int layoutVersion: 0
-        property bool agentEnabled: true
+        property bool agentEnabled: false
         property bool developerEnableAiFlightExecution: false
         property string agentEndpoint: "http://127.0.0.1:8765"
         property int maxMessages: 80
@@ -79,8 +114,12 @@ Item {
 
     Component.onCompleted: {
         Qt.callLater(resetPanelLayoutIfNeeded)
-        aiAgentClient.checkHealth()
-        aiAgentClient.loadInfo()
+    }
+
+    onExpandedChanged: {
+        if (expanded && assistantSettings.agentEnabled) {
+            aiSupervisor.ensureRunning()
+        }
     }
 
     onAvailablePanelHeightChanged: {
@@ -383,6 +422,12 @@ Item {
             return
         }
 
+        if (!aiSupervisor.healthReady) {
+            appendMessage("assistant", tr("%1：%2").arg(aiSupervisor.stateText).arg(aiSupervisor.lastError.length > 0 ? aiSupervisor.lastError : tr("本机Agent尚未就绪。")))
+            aiSupervisor.ensureRunning()
+            return
+        }
+
         appendMessage("assistant", tr("正在连接本机 Agent：%1").arg(aiAgentClient.endpoint))
         aiAgentClient.sendMessage(clean, agentContext(), allowedAgentCapabilities())
     }
@@ -624,8 +669,8 @@ Item {
                         Layout.fillWidth: true
                         text: vehicles ? tr("%1 架飞行器在线 · %2")
                                          .arg(vehicles.count)
-                                         .arg(assistantSettings.agentEnabled ? tr("Agent") : tr("本地规则"))
-                                       : tr("未连接飞行器 · %1").arg(assistantSettings.agentEnabled ? tr("Agent") : tr("本地规则"))
+                                         .arg(assistantSettings.agentEnabled ? aiSupervisor.stateText : tr("本地规则"))
+                                       : tr("未连接飞行器 · %1").arg(assistantSettings.agentEnabled ? aiSupervisor.stateText : tr("本地规则"))
                         font.pixelSize: 11
                         color: qgcPal.colorGrey
                     }
@@ -654,7 +699,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.settingsOpen ? 218 : 0
+                Layout.preferredHeight: root.settingsOpen ? 258 : 0
                 visible: root.settingsOpen
                 radius: 7
                 color: Qt.rgba(qgcPal.windowShade.r, qgcPal.windowShade.g, qgcPal.windowShade.b, 0.88)
@@ -670,19 +715,25 @@ Item {
                         Layout.fillWidth: true
                         QGCCheckBox {
                             id: agentSwitch
-                            text: tr("启用本机 Agent")
+                            text: tr("启用本机智能体")
                             checked: assistantSettings.agentEnabled
                             onClicked: {
                                 assistantSettings.agentEnabled = checked
-                                if (checked) aiAgentClient.checkHealth()
+                                if (checked) {
+                                    aiSupervisor.ensureRunning()
+                                } else {
+                                    aiSupervisor.stopAgent()
+                                    aiAgentClient.clearLocalToken()
+                                }
                             }
                         }
                         QGCLabel {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignRight
-                            text: aiAgentClient.statusText
-                            color: agentRequestRunning ? qgcPal.colorOrange
-                                                       : aiAgentClient.agentOnline ? qgcPal.colorGreen : qgcPal.colorGrey
+                            text: agentRequestRunning ? tr("请求中") : aiSupervisor.stateText
+                            color: agentRequestRunning || aiSupervisor.state === AiServiceSupervisor.Checking || aiSupervisor.state === AiServiceSupervisor.Starting
+                                   ? qgcPal.colorOrange
+                                   : aiSupervisor.healthReady ? qgcPal.colorGreen : qgcPal.colorGrey
                             font.pixelSize: 11
                         }
                     }
@@ -692,6 +743,18 @@ Item {
                         text: tr("地址：%1").arg(aiAgentClient.endpoint)
                         color: qgcPal.text
                         font.pixelSize: 12
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        text: aiSupervisor.lastError.length > 0 ? tr("状态：%1").arg(aiSupervisor.lastError)
+                                                                : tr("状态：%1").arg(aiSupervisor.stateText)
+                        color: aiSupervisor.state === AiServiceSupervisor.PortConflict ||
+                               aiSupervisor.state === AiServiceSupervisor.Error ||
+                               aiSupervisor.state === AiServiceSupervisor.NotInstalled ||
+                               aiSupervisor.state === AiServiceSupervisor.Crashed ? qgcPal.warningText : qgcPal.text
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
                     }
 
                     QGCLabel {
@@ -726,6 +789,12 @@ Item {
                             Layout.fillWidth: true
                             text: tr("清空历史")
                             onClicked: root.clearChatHistory()
+                        }
+                        QGCButton {
+                            Layout.fillWidth: true
+                            text: tr("重启Agent")
+                            enabled: assistantSettings.agentEnabled
+                            onClicked: aiSupervisor.restartAgent()
                         }
                         QGCButton {
                             Layout.fillWidth: true
@@ -821,8 +890,10 @@ Item {
                 QGCTextField {
                     id: inputField
                     Layout.fillWidth: true
-                    placeholderText: agentRequestRunning ? tr("等待 Agent 响应...") : tr("输入指令或问题")
-                    enabled: !agentRequestRunning
+                    placeholderText: agentRequestRunning ? tr("等待 Agent 响应...")
+                                     : assistantSettings.agentEnabled && !aiSupervisor.healthReady ? tr("等待本机智能体就绪...")
+                                     : tr("输入指令或问题")
+                    enabled: !agentRequestRunning && (!assistantSettings.agentEnabled || aiSupervisor.healthReady)
                     onAccepted: {
                         root.handleUserText(text)
                         text = ""
@@ -830,7 +901,7 @@ Item {
                 }
                 QGCButton {
                     text: tr("发送")
-                    enabled: !agentRequestRunning
+                    enabled: !agentRequestRunning && (!assistantSettings.agentEnabled || aiSupervisor.healthReady)
                     onClicked: {
                         root.handleUserText(inputField.text)
                         inputField.text = ""

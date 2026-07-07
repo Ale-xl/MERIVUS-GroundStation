@@ -59,6 +59,16 @@ void AiAgentClient::setEndpoint(const QString& endpoint)
     emit endpointChanged();
 }
 
+void AiAgentClient::setLocalToken(const QString& token)
+{
+    _localToken = token.trimmed();
+}
+
+void AiAgentClient::clearLocalToken()
+{
+    _localToken.clear();
+}
+
 void AiAgentClient::checkHealth()
 {
     if (!_agentEnabled) {
@@ -116,7 +126,7 @@ QString AiAgentClient::sendMessage(const QString& message, const QVariantMap& co
     payload.insert(QStringLiteral("allowed_capabilities"), _capabilitiesArray(allowedCapabilities));
 
     QNetworkReply* reply = _networkManager.post(
-        _jsonRequest(QStringLiteral("/merivus/agent")),
+        _jsonRequest(QStringLiteral("/merivus/agent"), true),
         QJsonDocument(payload).toJson(QJsonDocument::Compact));
 
     _currentChatReply = reply;
@@ -139,11 +149,14 @@ void AiAgentClient::cancelCurrentRequest()
     }
 }
 
-QNetworkRequest AiAgentClient::_jsonRequest(const QString& path) const
+QNetworkRequest AiAgentClient::_jsonRequest(const QString& path, bool includeLocalToken) const
 {
     QNetworkRequest request(_urlForPath(path));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json; charset=utf-8"));
     request.setRawHeader("Accept", "application/json");
+    if (includeLocalToken && !_localToken.isEmpty()) {
+        request.setRawHeader("X-Merivus-Token", _localToken.toUtf8());
+    }
     return request;
 }
 

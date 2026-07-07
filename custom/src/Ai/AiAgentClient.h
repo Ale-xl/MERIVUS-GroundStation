@@ -40,6 +40,8 @@ public:
     void setAgentEnabled(bool enabled);
     void setEndpoint(const QString& endpoint);
 
+    Q_INVOKABLE void setLocalToken(const QString& token);
+    Q_INVOKABLE void clearLocalToken();
     Q_INVOKABLE void checkHealth();
     Q_INVOKABLE void loadInfo();
     Q_INVOKABLE QString sendMessage(const QString& message,
@@ -67,7 +69,7 @@ private:
         Chat,
     };
 
-    QNetworkRequest _jsonRequest(const QString& path) const;
+    QNetworkRequest _jsonRequest(const QString& path, bool includeLocalToken = false) const;
     QUrl _urlForPath(const QString& path) const;
     void _attachTimeout(QNetworkReply* reply, int timeoutMs);
     void _handleReplyFinished(QNetworkReply* reply, RequestKind kind, const QString& requestId);
@@ -95,6 +97,7 @@ private:
 
     bool _agentEnabled = true;
     bool _agentOnline = false;
+    QString _localToken;
     QString _statusText = QStringLiteral("Agent未启动");
     QString _lastError;
     QString _provider = QStringLiteral("mock");

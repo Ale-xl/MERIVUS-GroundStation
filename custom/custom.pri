@@ -31,12 +31,14 @@ QML_IMPORT_PATH += \
 
 SOURCES += \
     $$PWD/src/Ai/AiAgentClient.cc \
+    $$PWD/src/Ai/AiServiceSupervisor.cc \
     $$PWD/src/CustomPlugin.cc \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.cc \
     $$PWD/src/Swarm/SwarmController.cc
 
 HEADERS += \
     $$PWD/src/Ai/AiAgentClient.h \
+    $$PWD/src/Ai/AiServiceSupervisor.h \
     $$PWD/src/CustomPlugin.h \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.h \
     $$PWD/src/Swarm/SwarmController.h

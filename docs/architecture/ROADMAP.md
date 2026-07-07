@@ -162,21 +162,33 @@
 
 建议分支：`feat/agent-supervisor`
 
+状态：completed
+
 任务：
 
 - 实现 `AiServiceSupervisor`。
-- 使用 `QProcess` 启动 Agent。
-- Agent 位于 `agent/merivus-agent.exe`。
-- 定期检查 `/health`。
-- QGC 退出时关闭 Agent。
+- 使用普通 `QProcess` 启动 Agent，不使用 `startDetached`。
+- 发布模式 Agent 位于 `applicationDirPath()/agent/merivus-agent.exe`。
+- 开发模式仅在 `MERIVUS_AGENT_DEV_PYTHON` 和 `MERIVUS_AGENT_DEV_ROOT` 显式配置后启用。
+- 启动前检查 `/health`，复用兼容外部 Agent，识别不兼容端口冲突。
+- 启动后轮询 `/health`，运行期定期检查。
+- QGC 退出时只关闭自己启动的 Agent。
+- 使用内存本地 Token 保护 Supervisor 启动的 POST 聊天请求。
 - 不使用开发机绝对路径。
 
 验收：
 
-- 双击地面站可启动 Agent。
-- Agent 崩溃不影响 QGC。
-- 安装路径变化后仍能找到 Agent。
-- 日志写入用户可写目录。
+- 发布包放置 `agent/merivus-agent.exe` 后可由地面站启动 Agent。
+- 未安装 Agent 时显示清晰状态，QGC 继续可用。
+- Agent 崩溃不影响 QGC，并受最多 2 次自动重启限制。
+- 安装路径变化后仍按 `applicationDirPath()` 查找 Agent。
+- Token 不写入配置、日志或 Git。
+
+未完成或后续验证：
+
+- 最终 Windows 打包尚未完成。
+- GUI 全流程仍需在可交互环境人工冒烟验证。
+- 日志写入用户可写目录属于发布打包阶段继续确认。
 
 依赖：阶段 3、4。
 

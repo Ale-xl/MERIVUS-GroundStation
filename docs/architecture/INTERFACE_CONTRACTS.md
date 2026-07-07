@@ -1,6 +1,6 @@
 # MERIVUS 接口契约草案
 
-本文档定义阶段 0 以来的接口边界。`feat/local-agent-http` 已实现独立 Python Mock Agent 的本机 HTTP 契约；`feat/qgc-agent-client` 已将 QGC AI 面板默认发送路径迁移到 C++ `AiAgentClient`。
+本文档定义阶段 0 以来的接口边界。`feat/local-agent-http` 已实现独立 Python Mock Agent 的本机 HTTP 契约；`feat/qgc-agent-client` 已将 QGC AI 面板默认发送路径迁移到 C++ `AiAgentClient`；`feat/agent-supervisor` 增加 `AiServiceSupervisor` 管理本机 Agent 生命周期。
 
 ## QGC 到 Agent
 
@@ -11,6 +11,7 @@ GET  http://127.0.0.1:8765/health
 GET  http://127.0.0.1:8765/merivus/info
 POST http://127.0.0.1:8765/merivus/agent
 Content-Type: application/json
+X-Merivus-Token: <仅当QGC Supervisor启动Agent时携带>
 ```
 
 ### 请求 Schema
@@ -64,6 +65,8 @@ Content-Type: application/json
 - 不允许返回原始 MAVLink 参数数组作为通用执行接口。
 - Agent 超时、离线、返回无效 JSON 时，QGC 只显示错误，不影响飞控主功能。
 - `proposal` 只是建议，不包含 `executed=true`、MAVLink 消息 ID、Shell 命令或 PX4 参数写入。
+- Supervisor 启动的 Agent 可要求 `X-Merivus-Token`；Token 只存在于当前进程内存和子进程环境，不进入 QML 展示、配置文件、日志或 Git。
+- health/info 继续不要求 Token，便于启动前检查和外部开发 Agent 兼容。
 
 ## 本机 Agent 已实现接口
 
@@ -80,6 +83,7 @@ Content-Type: application/json
 - `MERIVUS_AGENT_PROVIDER=mock`
 - `MERIVUS_AGENT_LOG_LEVEL=INFO`
 - `MERIVUS_AGENT_MAX_MESSAGE_LENGTH=8000`
+- `MERIVUS_LOCAL_TOKEN`：可选，由 QGC Supervisor 启动子进程时生成并传入。
 
 本阶段不接 OpenAI、DeepSeek、Gemini、Ollama、MCP、GIS 真实服务、云服务器、数据库、MAVLink、Vehicle 或 SwarmController。
 
@@ -191,15 +195,18 @@ UI 操作：
 ## 从代码中确认
 
 - 当前 AI 面板默认发送路径调用 QML 注册类型 `Merivus.AiAgentClient`。
+- 当前 AI 面板通过 QML 注册类型 `Merivus.AiServiceSupervisor` 调用 `ensureRunning()` 管理本机 Agent。
 - QML 不再直接创建活动 `XMLHttpRequest`。
 - C++ 请求字段为 `request_id`、`session_id`、`message`、`context`、`allowed_capabilities`。
 - C++ 响应字段校验为 `request_id`、`reply`、`proposal`、`provider`、`model`、`status`。
 - `proposal` 只在 QML 中显示为未执行建议，不转换为 Vehicle、MAVLink、Swarm 或 PX4 操作。
-- 独立 Python Agent 已按新契约实现 Mock HTTP 服务，当前仍需开发者手动启动。
+- 独立 Python Agent 已按新契约实现 Mock HTTP 服务，并支持 `python -m app` 作为 Supervisor 的开发启动入口。
+- Supervisor 发布启动路径为 `QCoreApplication::applicationDirPath()/agent/merivus-agent.exe`；开发启动路径仅由 `MERIVUS_AGENT_DEV_PYTHON` 和 `MERIVUS_AGENT_DEV_ROOT` 显式启用。
+- Supervisor 不使用 `startDetached`，不使用阻塞式 `waitForFinished()`，也不自动 kill 端口上的未知进程。
 
 ## 待确认事项
 
 - 是否保留兼容旧 `intent` 字段一段时间；当前 QGC 默认路径已切到 `proposal`。
 - Agent 本机端口当前固定为 `8765`，普通用户暂不编辑。
-- 本机 Agent 已预留 `MERIVUS_LOCAL_TOKEN`，但正式随机会话 Token 需要 QGC 进程监管阶段实现。
+- 本机 Agent 已支持 `MERIVUS_LOCAL_TOKEN`，QGC Supervisor 已实现当前进程内随机 Token 传递；后续发布包仍需确认日志和进程环境暴露边界。
 - 多机场景下 `vehicle_id` 与 PX4 `sysid` 的映射规则。
