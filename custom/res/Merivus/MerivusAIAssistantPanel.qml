@@ -8,13 +8,14 @@ import QGroundControl               1.0
 import QGroundControl.Controls      1.0
 import QGroundControl.Palette       1.0
 import QGroundControl.ScreenTools   1.0
+import Merivus                      1.0
 
 Item {
     id: root
 
     property bool expanded: false
     property bool settingsOpen: false
-    property bool agentRequestRunning: false
+    readonly property bool agentRequestRunning: aiAgentClient.requestInProgress
     property bool _bubbleHovered: false
     property bool _panelHovered: false
     property var vehicles: QGroundControl.multiVehicleManager.vehicles
@@ -22,42 +23,65 @@ Item {
     property var pendingIntent: null
     property string pendingSummary: ""
     property real headerOffset: mainWindow.header && mainWindow.header.visible ? mainWindow.header.height + 6 : 8
-    property real availablePanelHeight: parent ? Math.max(340, parent.height - headerOffset - 10) : 760
-    property real minPanelWidth: Math.min(390, parent ? parent.width * 0.82 : 390)
-    property real maxPanelWidth: parent ? Math.max(minPanelWidth, Math.min(parent.width * 0.46, 620)) : 520
-    property real minPanelHeight: Math.min(440, availablePanelHeight)
+    property real availablePanelHeight: parent ? Math.max(320, parent.height - headerOffset - 18) : 760
+    property real defaultPanelWidth: parent ? clamp(parent.width * 0.21, 340, 380) : 346
+    property real defaultPanelHeight: parent ? clamp(parent.height * 0.82, Math.min(620, availablePanelHeight), availablePanelHeight) : 760
+    property real defaultPanelTopMargin: parent ? clamp(headerOffset + 10, headerOffset, Math.max(headerOffset, parent.height - defaultPanelHeight - 8)) : headerOffset + 10
+    property real maxPanelWidth: parent ? Math.max(320, Math.min(parent.width * 0.40, 640)) : 640
+    property real minPanelWidth: Math.min(320, maxPanelWidth)
+    property real minPanelHeight: Math.min(320, availablePanelHeight)
     property real maxPanelHeight: Math.max(minPanelHeight, availablePanelHeight)
     property real panelWidth: clamp(assistantSettings.panelWidth, minPanelWidth, maxPanelWidth)
     property real panelHeight: clamp(assistantSettings.panelHeight, minPanelHeight, maxPanelHeight)
     property real panelTopMargin: clamp(assistantSettings.panelTopMargin, headerOffset,
                                         parent ? Math.max(headerOffset, parent.height - panelHeight - 8) : headerOffset)
     readonly property string _agentGuide:
-        "推荐部署方式：在地面站本机启动一个外部 Agent HTTP 服务，面板只把文本、飞行器摘要和最近消息发给该服务；服务内部再调用 OpenAI/本地大模型/MCP 工具，返回 reply 或受控 intent。当前安全封锁分支只允许飞行动作 intent 生成未执行建议，不调用 Vehicle 接口。\n\n" +
-        "默认接口：POST /merivus/agent\n" +
-        "请求字段：message、model、fleet、history\n" +
-        "响应字段：reply、intent。intent.action 仅允许 takeoff、land、rtl、pause。"
+        "当前阶段使用本机 Mock Agent HTTP 服务，QML 只负责界面，HTTP 请求由 C++ AiAgentClient 发起。Agent 需要开发者手动启动，不接真实模型，不执行飞行动作。\n\n" +
+        "默认接口：GET /health、GET /merivus/info、POST /merivus/agent\n" +
+        "请求字段：request_id、session_id、message、context、allowed_capabilities\n" +
+        "响应字段：request_id、reply、proposal、provider、model、status。proposal 只显示为未执行建议。"
 
     anchors.fill: parent
     z: QGroundControl.zOrderTopMost + 20
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
+    AiAgentClient {
+        id: aiAgentClient
+        agentEnabled: assistantSettings.agentEnabled
+        endpoint: assistantSettings.agentEndpoint
+
+        onResponseReceived: {
+            if (reply.length > 0) {
+                root.appendMessage("assistant", reply)
+            }
+            root.handleAgentProposal(proposal, requestId)
+        }
+
+        onRequestFailed: {
+            root.appendMessage("assistant", tr("Agent请求失败：%1").arg(message))
+        }
+    }
+
     Settings {
         id: assistantSettings
         category: "MerivusAIAssistant"
 
-        property real panelWidth: 448
+        property real panelWidth: 400
         property real panelHeight: 760
         property real panelTopMargin: 112
         property int layoutVersion: 0
-        property bool agentEnabled: false
+        property bool agentEnabled: true
         property bool developerEnableAiFlightExecution: false
-        property string agentEndpoint: "http://127.0.0.1:8765/merivus/agent"
-        property string agentModel: "gpt-4.1-mini"
+        property string agentEndpoint: "http://127.0.0.1:8765"
         property int maxMessages: 80
     }
 
-    Component.onCompleted: Qt.callLater(resetPanelLayoutIfNeeded)
+    Component.onCompleted: {
+        Qt.callLater(resetPanelLayoutIfNeeded)
+        aiAgentClient.checkHealth()
+        aiAgentClient.loadInfo()
+    }
 
     onAvailablePanelHeightChanged: {
         assistantSettings.panelHeight = clamp(assistantSettings.panelHeight, minPanelHeight, maxPanelHeight)
@@ -73,11 +97,11 @@ Item {
 
     function resetPanelLayoutIfNeeded() {
         if (!parent || parent.height <= 0) return
-        if (assistantSettings.layoutVersion < 3) {
-            assistantSettings.panelWidth = clamp(parent.width * 0.235, minPanelWidth, maxPanelWidth)
-            assistantSettings.panelHeight = maxPanelHeight
-            assistantSettings.panelTopMargin = headerOffset
-            assistantSettings.layoutVersion = 3
+        if (assistantSettings.layoutVersion < 5) {
+            assistantSettings.panelWidth = defaultPanelWidth
+            assistantSettings.panelHeight = defaultPanelHeight
+            assistantSettings.panelTopMargin = defaultPanelTopMargin
+            assistantSettings.layoutVersion = 5
         }
     }
 
@@ -267,7 +291,7 @@ Item {
             return true
         }
 
-        if (/智能体|大模型|agent|llm|mcp|部署/i.test(clean)) {
+        if (/智能体|大模型|agent|llm|部署/i.test(clean)) {
             appendMessage("assistant", _agentGuide)
             return true
         }
@@ -315,56 +339,52 @@ Item {
         return history
     }
 
-    function handleAgentIntent(intent) {
-        if (!intent || !intent.action) return false
-        var action = String(intent.action).toLowerCase()
-        if (["takeoff", "land", "rtl", "pause"].indexOf(action) === -1) return false
-        var ids = normalizeIds(intent.vehicleIds || intent.ids || defaultVehicleIds())
-        var altitude = action === "takeoff" ? clamp(Number(intent.altitude || 10), 1, 120) : 0
-        prepareIntent(buildIntent(action, ids, altitude))
+    function agentContext() {
+        return {
+            vehicle_count: vehicles ? vehicles.count : 0,
+            active_vehicle_id: activeVehicle ? activeVehicle.id : null,
+            connected: activeVehicle !== null,
+            armed: activeVehicle ? activeVehicle.armed : false
+        }
+    }
+
+    function allowedAgentCapabilities() {
+        return [
+            "vehicle.query_status",
+            "vehicle.query_battery",
+            "vehicle.query_position",
+            "vehicle.query_rtk",
+            "log.explain_error",
+            "mission.analyze",
+            "mission.create_draft",
+            "vehicle.takeoff",
+            "vehicle.land",
+            "vehicle.rtl",
+            "vehicle.pause"
+        ]
+    }
+
+    function handleAgentProposal(proposal, requestId) {
+        if (!proposal || typeof proposal !== "object") return false
+
+        var command = proposal.command ? String(proposal.command) : tr("未知建议")
+        var summary = proposal.summary ? String(proposal.summary) : tr("Agent返回了结构化建议，但未提供摘要。")
+        appendMessage("assistant",
+                      tr("未执行建议：%1\n命令：%2\nrequest_id：%3\n该proposal仅用于显示，本阶段不会转换为飞行动作。")
+                      .arg(summary)
+                      .arg(command)
+                      .arg(requestId))
         return true
     }
 
     function callAgent(clean) {
-        if (agentRequestRunning) return
-        agentRequestRunning = true
-        appendMessage("assistant", tr("正在发送给本机 Agent：%1").arg(assistantSettings.agentEndpoint))
-
-        var xhr = new XMLHttpRequest()
-        xhr.open("POST", assistantSettings.agentEndpoint)
-        xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            agentRequestRunning = false
-
-            if (xhr.status < 200 || xhr.status >= 300) {
-                appendMessage("assistant", tr("Agent 暂不可用（HTTP %1）。已保留本地规则模式，可先使用状态查询和快捷命令。").arg(xhr.status))
-                return
-            }
-
-            try {
-                var data = JSON.parse(xhr.responseText)
-                if (data.reply) appendMessage("assistant", data.reply)
-                if (data.intent) handleAgentIntent(data.intent)
-                if (!data.reply && !data.intent) {
-                    appendMessage("assistant", tr("Agent 已响应，但没有返回 reply 或 intent 字段。"))
-                }
-            } catch (e) {
-                appendMessage("assistant", tr("Agent 响应不是有效 JSON：%1").arg(e))
-            }
+        if (agentRequestRunning) {
+            appendMessage("assistant", tr("已有Agent请求正在处理中，请等待当前请求完成。"))
+            return
         }
 
-        xhr.onerror = function() {
-            agentRequestRunning = false
-            appendMessage("assistant", tr("无法连接 Agent 服务。请确认本机服务已启动，或关闭“启用外部 Agent”。"))
-        }
-
-        xhr.send(JSON.stringify({
-            message: clean,
-            model: assistantSettings.agentModel,
-            fleet: describeFleet(),
-            history: chatHistoryForAgent()
-        }))
+        appendMessage("assistant", tr("正在连接本机 Agent：%1").arg(aiAgentClient.endpoint))
+        aiAgentClient.sendMessage(clean, agentContext(), allowedAgentCapabilities())
     }
 
     function handleUserText(text) {
@@ -372,11 +392,15 @@ Item {
         if (clean.length === 0) return
         appendMessage("user", clean)
 
-        if (routeLocalText(clean)) return
-
         if (assistantSettings.agentEnabled) {
+            if (/清空|清除|删除.*历史|clear/i.test(clean)) {
+                clearChatHistory()
+                appendMessage("assistant", tr("已清空当前会话记录。"))
+                return
+            }
             callAgent(clean)
         } else {
+            if (routeLocalText(clean)) return
             appendMessage("assistant", tr("当前使用本地规则模式：支持状态查询、参数说明提示，以及起飞/降落/返航/暂停建议。复杂坐标和航线操作建议继续使用地图交互；需要大模型能力时可在右上角配置中启用外部 Agent。"))
         }
     }
@@ -391,10 +415,16 @@ Item {
         height: root.panelHeight
         radius: 8
         color: Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, _panelHovered ? 0.98 : 0.94)
-        border.color: _panelHovered ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.24)
-        border.width: _panelHovered ? 2 : 1
+        border.color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.24)
+        border.width: 1
         visible: root.expanded
         clip: true
+
+        property string activeResizeEdge: ""
+        property bool resizePressed: resizeLeftHandle.pressed || resizeTopHandle.pressed || resizeBottomHandle.pressed
+        property bool resizeLeftActive: activeResizeEdge === "left" || (!resizePressed && resizeLeftHandle.containsMouse)
+        property bool resizeTopActive: activeResizeEdge === "top" || (!resizePressed && resizeTopHandle.containsMouse)
+        property bool resizeBottomActive: activeResizeEdge === "bottom" || (!resizePressed && resizeBottomHandle.containsMouse)
 
         Behavior on width { NumberAnimation { duration: resizeLeftHandle.pressed ? 0 : 120 } }
         Behavior on height { NumberAnimation { duration: resizeTopHandle.pressed || resizeBottomHandle.pressed ? 0 : 120 } }
@@ -412,30 +442,39 @@ Item {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            width: 6
-            color: resizeLeftHandle.containsMouse || resizeLeftHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.14)
-            opacity: resizeLeftHandle.containsMouse || resizeLeftHandle.pressed ? 0.95 : 0.55
+            width: assistantPanel.resizeLeftActive ? 3 : 0
+            color: qgcPal.buttonHighlight
+            opacity: assistantPanel.resizeLeftActive ? 1 : 0
             z: 4
+
+            Behavior on width { NumberAnimation { duration: 100 } }
+            Behavior on opacity { NumberAnimation { duration: 100 } }
         }
 
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 6
-            color: resizeTopHandle.containsMouse || resizeTopHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.10)
-            opacity: resizeTopHandle.containsMouse || resizeTopHandle.pressed ? 0.95 : 0.0
+            height: assistantPanel.resizeTopActive ? 3 : 0
+            color: qgcPal.buttonHighlight
+            opacity: assistantPanel.resizeTopActive ? 1 : 0
             z: 4
+
+            Behavior on height { NumberAnimation { duration: 100 } }
+            Behavior on opacity { NumberAnimation { duration: 100 } }
         }
 
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 6
-            color: resizeBottomHandle.containsMouse || resizeBottomHandle.pressed ? qgcPal.buttonHighlight : Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.10)
-            opacity: resizeBottomHandle.containsMouse || resizeBottomHandle.pressed ? 0.95 : 0.0
+            height: assistantPanel.resizeBottomActive ? 3 : 0
+            color: qgcPal.buttonHighlight
+            opacity: assistantPanel.resizeBottomActive ? 1 : 0
             z: 4
+
+            Behavior on height { NumberAnimation { duration: 100 } }
+            Behavior on opacity { NumberAnimation { duration: 100 } }
         }
 
         MouseArea {
@@ -443,23 +482,30 @@ Item {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            width: 14
+            width: 12
             hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            propagateComposedEvents: false
             cursorShape: Qt.SizeHorCursor
 
-            property real startX: 0
+            property real startMouseX: 0
             property real startWidth: 0
 
             onPressed: {
-                startX = mouse.x
-                startWidth = assistantSettings.panelWidth
+                mouse.accepted = true
+                assistantPanel.activeResizeEdge = "left"
+                startMouseX = mapToItem(root, mouse.x, mouse.y).x
+                startWidth = root.panelWidth
             }
             onPositionChanged: {
                 if (pressed) {
-                    var delta = startX - mouse.x
-                    assistantSettings.panelWidth = root.clamp(startWidth + delta, root.minPanelWidth, root.maxPanelWidth)
+                    var currentMouseX = mapToItem(root, mouse.x, mouse.y).x
+                    assistantSettings.panelWidth = root.clamp(startWidth - (currentMouseX - startMouseX), root.minPanelWidth, root.maxPanelWidth)
                 }
             }
+            onReleased: assistantPanel.activeResizeEdge = ""
+            onCanceled: assistantPanel.activeResizeEdge = ""
         }
 
         MouseArea {
@@ -467,30 +513,39 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 14
+            height: 10
             hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            propagateComposedEvents: false
             cursorShape: Qt.SizeVerCursor
             z: 5
 
-            property real startY: 0
+            property real startMouseY: 0
             property real startHeight: 0
             property real startTop: 0
 
             onPressed: {
-                startY = mouse.y
-                startHeight = assistantSettings.panelHeight
-                startTop = assistantSettings.panelTopMargin
+                mouse.accepted = true
+                assistantPanel.activeResizeEdge = "top"
+                startMouseY = mapToItem(root, mouse.x, mouse.y).y
+                startHeight = root.panelHeight
+                startTop = root.panelTopMargin
             }
             onPositionChanged: {
-                if (!pressed || !parent.parent) return
-                var delta = mouse.y - startY
-                var bottom = startTop + startHeight
+                if (!pressed) return
+                var currentMouseY = mapToItem(root, mouse.x, mouse.y).y
+                var delta = currentMouseY - startMouseY
+                var bottom = parent ? Math.min(root.height - 8, startTop + startHeight) : startTop + startHeight
                 var newTop = root.clamp(startTop + delta, root.headerOffset,
                                         Math.max(root.headerOffset, bottom - root.minPanelHeight))
-                var newHeight = root.clamp(bottom - newTop, root.minPanelHeight, root.maxPanelHeight)
+                var maxHeight = Math.min(root.maxPanelHeight, Math.max(root.minPanelHeight, root.height - newTop - 8))
+                var newHeight = root.clamp(bottom - newTop, root.minPanelHeight, maxHeight)
                 assistantSettings.panelTopMargin = newTop
                 assistantSettings.panelHeight = newHeight
             }
+            onReleased: assistantPanel.activeResizeEdge = ""
+            onCanceled: assistantPanel.activeResizeEdge = ""
         }
 
         MouseArea {
@@ -498,32 +553,41 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 14
+            height: 10
             hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            propagateComposedEvents: false
             cursorShape: Qt.SizeVerCursor
             z: 5
 
-            property real startY: 0
+            property real startMouseY: 0
             property real startHeight: 0
 
             onPressed: {
-                startY = mouse.y
-                startHeight = assistantSettings.panelHeight
+                mouse.accepted = true
+                assistantPanel.activeResizeEdge = "bottom"
+                startMouseY = mapToItem(root, mouse.x, mouse.y).y
+                startHeight = root.panelHeight
             }
             onPositionChanged: {
                 if (pressed) {
-                    var delta = mouse.y - startY
-                    assistantSettings.panelHeight = root.clamp(startHeight + delta, root.minPanelHeight, root.maxPanelHeight)
+                    var currentMouseY = mapToItem(root, mouse.x, mouse.y).y
+                    var delta = currentMouseY - startMouseY
+                    var maxHeight = Math.min(root.maxPanelHeight, Math.max(root.minPanelHeight, root.height - root.panelTopMargin - 8))
+                    assistantSettings.panelHeight = root.clamp(startHeight + delta, root.minPanelHeight, maxHeight)
                 }
             }
+            onReleased: assistantPanel.activeResizeEdge = ""
+            onCanceled: assistantPanel.activeResizeEdge = ""
         }
 
         ColumnLayout {
             anchors.fill: parent
             anchors.leftMargin: 14
             anchors.rightMargin: 10
-            anchors.topMargin: 10
-            anchors.bottomMargin: 10
+            anchors.topMargin: 14
+            anchors.bottomMargin: 14
             spacing: 8
 
             RowLayout {
@@ -606,31 +670,35 @@ Item {
                         Layout.fillWidth: true
                         QGCCheckBox {
                             id: agentSwitch
-                            text: tr("启用外部 Agent")
+                            text: tr("启用本机 Agent")
                             checked: assistantSettings.agentEnabled
-                            onClicked: assistantSettings.agentEnabled = checked
+                            onClicked: {
+                                assistantSettings.agentEnabled = checked
+                                if (checked) aiAgentClient.checkHealth()
+                            }
                         }
                         QGCLabel {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignRight
-                            text: agentRequestRunning ? tr("请求中") : tr("白名单确认执行")
-                            color: agentRequestRunning ? qgcPal.colorOrange : qgcPal.colorGrey
+                            text: aiAgentClient.statusText
+                            color: agentRequestRunning ? qgcPal.colorOrange
+                                                       : aiAgentClient.agentOnline ? qgcPal.colorGreen : qgcPal.colorGrey
                             font.pixelSize: 11
                         }
                     }
 
-                    QGCTextField {
+                    QGCLabel {
                         Layout.fillWidth: true
-                        text: assistantSettings.agentEndpoint
-                        placeholderText: tr("Agent HTTP 端点")
-                        onEditingFinished: assistantSettings.agentEndpoint = text
+                        text: tr("地址：%1").arg(aiAgentClient.endpoint)
+                        color: qgcPal.text
+                        font.pixelSize: 12
                     }
 
-                    QGCTextField {
+                    QGCLabel {
                         Layout.fillWidth: true
-                        text: assistantSettings.agentModel
-                        placeholderText: tr("模型名称")
-                        onEditingFinished: assistantSettings.agentModel = text
+                        text: tr("Provider/Model：%1 / %2").arg(aiAgentClient.provider).arg(aiAgentClient.model)
+                        color: qgcPal.text
+                        font.pixelSize: 12
                     }
 
                     RowLayout {

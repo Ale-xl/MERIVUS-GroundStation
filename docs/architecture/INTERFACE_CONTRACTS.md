@@ -1,6 +1,6 @@
 # MERIVUS 接口契约草案
 
-本文档定义阶段 0 以来的接口边界。`feat/local-agent-http` 已实现独立 Python Mock Agent 的本机 HTTP 契约；QGC C++ 接入仍属于后续分支。
+本文档定义阶段 0 以来的接口边界。`feat/local-agent-http` 已实现独立 Python Mock Agent 的本机 HTTP 契约；`feat/qgc-agent-client` 已将 QGC AI 面板默认发送路径迁移到 C++ `AiAgentClient`。
 
 ## QGC 到 Agent
 
@@ -190,14 +190,16 @@ UI 操作：
 
 ## 从代码中确认
 
-- 当前 AI 面板实际请求仍为 QML `XMLHttpRequest`，字段为 `message`、`model`、`fleet`、`history`。
-- 当前 AI 面板实际响应字段为 `reply`、`intent`，其中 `intent.action` 允许 `takeoff`、`land`、`rtl`、`pause`。
-- 当前 QGC UI 与本文推荐的 `request_id/session_id/context/allowed_capabilities/proposal` 契约不一致，需要在 `feat/qgc-agent-client` 及后续阶段逐步迁移。
-- 独立 Python Agent 已按新契约实现 Mock HTTP 服务，但尚未接入 QGC。
+- 当前 AI 面板默认发送路径调用 QML 注册类型 `Merivus.AiAgentClient`。
+- QML 不再直接创建活动 `XMLHttpRequest`。
+- C++ 请求字段为 `request_id`、`session_id`、`message`、`context`、`allowed_capabilities`。
+- C++ 响应字段校验为 `request_id`、`reply`、`proposal`、`provider`、`model`、`status`。
+- `proposal` 只在 QML 中显示为未执行建议，不转换为 Vehicle、MAVLink、Swarm 或 PX4 操作。
+- 独立 Python Agent 已按新契约实现 Mock HTTP 服务，当前仍需开发者手动启动。
 
 ## 待确认事项
 
-- 是否保留兼容旧 `intent` 字段一段时间。
-- Agent 本机端口是否固定为 `8765`，还是允许用户配置。
+- 是否保留兼容旧 `intent` 字段一段时间；当前 QGC 默认路径已切到 `proposal`。
+- Agent 本机端口当前固定为 `8765`，普通用户暂不编辑。
 - 本机 Agent 已预留 `MERIVUS_LOCAL_TOKEN`，但正式随机会话 Token 需要 QGC 进程监管阶段实现。
 - 多机场景下 `vehicle_id` 与 PX4 `sysid` 的映射规则。

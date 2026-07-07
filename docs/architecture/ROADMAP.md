@@ -136,6 +136,8 @@
 
 建议分支：`feat/qgc-agent-client`
 
+状态：completed
+
 任务：
 
 - 实现 C++ `AiAgentClient`。
@@ -144,6 +146,7 @@
 - 解析 `reply` 和 `proposal`。
 - 增加请求 ID、session ID、超时、取消和错误状态。
 - 只显示回复，不执行 proposal。
+- Agent 仍由开发者手动启动，不使用 `QProcess`。
 
 验收：
 
@@ -151,6 +154,7 @@
 - Agent 离线时飞控主功能正常。
 - 不阻塞 UI。
 - JSON 无效时安全拒绝。
+- 不接真实模型、不执行飞行动作、不修改 PX4。
 
 依赖：阶段 3。
 
