@@ -192,6 +192,37 @@
 
 依赖：阶段 3、4。
 
+## 阶段 5.5：Agent 发布打包 POC
+
+建议分支：`release/agent-packaging-poc`
+
+状态：completed
+
+任务：
+
+- 使用 PyInstaller onedir 打包 `agent/` 中的 Python Mock Agent。
+- 输出 `merivus-agent.exe`。
+- 新增 `agent/merivus-agent.spec` 和 `tools/dev/build-agent.ps1`。
+- 复制完整 onedir 输出到 QGC Release `staging/agent/`。
+- 验证 `staging/agent/merivus-agent.exe` 可直接运行并返回 health。
+- 不提交 `agent/build/`、`agent/dist/`、QGC build、staging、Token、`.env`、厂商 PDF 或日志。
+
+验收：
+
+- `GET /health`、`GET /merivus/info`、`POST /merivus/agent` 通过。
+- Token 正反验证通过。
+- 起飞请求只返回未执行 proposal。
+- 输出目录不包含源码、虚拟环境、PDF、密钥或模型文件。
+- Supervisor 发布路径保持 `applicationDirPath()/agent/merivus-agent.exe`。
+
+未完成或后续验证：
+
+- GUI 全流程需要人工在 `staging/MERIVUS.exe` 中验证。
+- 干净 Windows 电脑仍需验证。
+- 正式安装包、签名、AppData 日志目录和升级策略仍属于后续发布阶段。
+
+依赖：阶段 5。
+
 ## 阶段 6：结构化意图与安全白名单
 
 建议分支：`feat/ai-intent-policy`
