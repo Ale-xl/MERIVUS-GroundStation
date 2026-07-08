@@ -106,6 +106,23 @@ build/Desktop_Qt_5_15_2_MSVC2019_64bit-Release/staging/
 - `build/.../staging/agent/merivus-agent.exe` 可启动。
 - `GET /health` 返回正常。
 
+GUI 人工冒烟：
+
+- `staging/MERIVUS.exe` 能够按发布路径找到 `staging/agent/merivus-agent.exe`。
+- AI 面板启用“本机智能体”后，Supervisor 能够自动启动打包 Agent。
+- `/health` 正常，Supervisor 进入 `Healthy`。
+- QML 显示 Agent 已连接。
+- provider/model 显示 `mock/mock-v1`。
+- 普通聊天请求能够返回 Mock 回复。
+- 无 Vehicle 连接时未崩溃。
+- 高风险 proposal 只显示为未执行建议，不触发飞行动作。
+
+退出残留检查：
+
+- 本次只读检查未发现 `MERIVUS` 或 `merivus-agent` 进程。
+- 本次只读检查未发现 8765 端口监听。
+- 由于本轮没有自动控制完整 GUI 关闭序列，后续仍建议重复执行“启动 QGC -> Supervisor 启动 Agent -> 关闭 QGC -> 检查进程和端口释放”的人工验证。
+
 ## Token 传递
 
 Supervisor 启动 Agent 时生成内存 Token，并通过子进程环境传递：
@@ -130,7 +147,7 @@ Token 不写入 Git、配置文件或日志。
 
 ## 已知限制
 
-- GUI 全流程仍需人工验证：从 `staging/MERIVUS.exe` 打开 AI 面板、Supervisor 启动 Agent、进入 Healthy、聊天成功、起飞请求只显示 proposal、QGC 退出时关闭自己启动的 Agent。
+- GUI 主流程已人工验证；QGC 退出清理建议继续做可重复人工验证。
 - 尚未在干净 Windows 电脑验证无 Python 环境时的启动行为。
 - 尚未实现正式安装包、升级策略、签名、AppData 日志目录和崩溃收集。
 - 当前仍是 Mock Provider，不包含真实模型、模型文件或 API Key。

@@ -102,6 +102,21 @@ GET http://127.0.0.1:8765/health
 
 实现不使用 `startDetached`，不调用阻塞式 `waitForFinished()`，也不在 UI 线程进行长时间等待。
 
+## 打包 Agent GUI 冒烟
+
+`release/agent-packaging-poc` 阶段已完成一次 GUI 人工冒烟：
+
+- `staging/MERIVUS.exe` 能够通过 `applicationDirPath()/agent/merivus-agent.exe` 找到打包 Agent。
+- Supervisor 能够自动启动打包 Agent。
+- health 正常并进入 `Healthy`。
+- QML 显示 Agent 已连接。
+- provider/model 显示 `mock/mock-v1`。
+- 普通聊天请求能够返回 Mock 回复。
+- 无 Vehicle 连接时未崩溃。
+- proposal 只显示为未执行建议，不执行飞行动作。
+
+退出残留只读检查未发现 `MERIVUS` 或 `merivus-agent` 进程，也未发现 8765 端口监听。由于本轮没有自动控制完整 GUI 关闭序列，后续仍建议重复人工验证 QGC 关闭时自己启动的 Agent 会退出并释放端口。
+
 ## 本地 Token
 
 Supervisor 启动 Agent 时生成随机本机会话 Token，并通过子进程环境传递：
