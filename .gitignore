@@ -99,6 +99,9 @@ agent/build/
 *.pyc
 .env
 
+# Local vendor hardware manuals are kept outside Git.
+docs/hardware/local-manuals/*.pdf
+
 # Release signing credentials and store secrets
 *.keystore
 *.jks
