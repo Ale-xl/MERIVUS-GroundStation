@@ -210,3 +210,11 @@ UI 操作：
 - Agent 本机端口当前固定为 `8765`，普通用户暂不编辑。
 - 本机 Agent 已支持 `MERIVUS_LOCAL_TOKEN`，QGC Supervisor 已实现当前进程内随机 Token 传递；后续发布包仍需确认日志和进程环境暴露边界。
 - 多机场景下 `vehicle_id` 与 PX4 `sysid` 的映射规则。
+
+## AI 本地意图策略契约
+
+`feat/ai-intent-policy` 后，QGC 不再把 Agent `proposal` 原样交给 QML。`AiAgentClient` 会先调用 `AiSchemaValidator` 和 `AiCommandPolicy`，再把附带 `validationStatus`、`policyDecision`、`localRisk`、`requiresConfirmation`、`reason` 和 `executable=false` 的只读建议传给 QML。
+
+Agent 返回的 `risk`、`requires_confirmation`、`executable`、`executed` 等字段不具备权限含义，QGC 会忽略并本地重算。未知字段不会触发任何执行；危险字段、危险嵌套结构、原始 MAVLink 参数数组、shell/script/PX4 批处理内容会被拒绝。
+
+当前策略结果仅用于显示和审计，不连接 Vehicle、Mission、MAVLink、Swarm 或 PX4。高风险命令如 `vehicle.takeoff`、`vehicle.land`、`vehicle.rtl`、`mission.start`、`param.write`、`mavlink.send_raw` 不会执行。

@@ -4,7 +4,7 @@
 
 | 编号 | 级别 | 风险 | 当前证据 | 建议缓解 |
 | --- | --- | --- | --- | --- |
-| R-001 | P0 | AI 或 UI 绕过统一安全策略直接执行飞行动作 | AI 面板 QML 可确认后调用起飞/降落/返航/暂停；指挥中心可直接下发高度/速度/爬升 | 阶段 2/6 收敛为 C++ 白名单和 proposal 策略；第一版 AI 只做只读/建议 |
+| R-001 | P0 | AI 或 UI 绕过统一安全策略直接执行飞行动作 | AI 面板已进入 C++ proposal 策略和只显示建议；指挥中心仍可直接下发高度/速度/爬升 | 继续保持 AI `executable=false`；后续对非 AI 指挥中心入口增加确认、审计和权限 |
 | R-002 | P0 | 多机任务上传和启动缺少完整前置检查 | `SwarmController` 可上传临时任务并 `startMission` | 独立审计 `SwarmController`，增加 feature flag、确认、审计、Mock/SITL 验证 |
 | R-003 | P0 | 直接 MAVLink 打包发送逻辑难以审计 | `SwarmController` legacy forwarding 打包并发送 `GPS_RAW_INT` | 标记为调试/遗留功能，禁止 AI 调用，后续隔离或移除 |
 | R-004 | P0 | 真实飞机测试被自动化触发 | 用户描述已有实机无桨测试，但 Codex 禁止自动测试真实飞机 | 文档和流程中明确只用 Mock/SITL/回放；真实测试需人工授权 |
@@ -48,3 +48,13 @@
 - 是否优先修复 AI/Swarm 高风险入口。
 - 是否把 `docs/hardware` 纳入仓库。
 - 是否先做 Link 基线再做 AI 收敛。
+
+## 阶段 6 新增缓解
+
+- `AiSchemaValidator` 限制 proposal 结构、大小、深度和危险字段。
+- `AiCommandPolicy` 固定白名单并本地重算风险。
+- Agent 伪造的风险、确认和执行字段会被忽略。
+- AI 面板没有新增真实执行入口。
+- 审计只记录脱敏策略摘要。
+
+剩余 P0 风险转移到后续确认框架、非 AI 指挥入口审计、真实任务上传与 SwarmController 隔离。

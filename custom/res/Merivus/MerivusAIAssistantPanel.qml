@@ -408,11 +408,29 @@ Item {
 
         var command = proposal.command ? String(proposal.command) : tr("未知建议")
         var summary = proposal.summary ? String(proposal.summary) : tr("Agent返回了结构化建议，但未提供摘要。")
-        appendMessage("assistant",
-                      tr("未执行建议：%1\n命令：%2\nrequest_id：%3\n该proposal仅用于显示，本阶段不会转换为飞行动作。")
-                      .arg(summary)
-                      .arg(command)
-                      .arg(requestId))
+        var validation = proposal.validationStatus ? String(proposal.validationStatus) : tr("InvalidSchema")
+        var decision = proposal.policyDecision ? String(proposal.policyDecision) : tr("Deny")
+        var risk = proposal.localRisk ? String(proposal.localRisk) : tr("Critical")
+        var requiresConfirmation = proposal.requiresConfirmation === true ? tr("是") : tr("否")
+        var reason = proposal.reason ? String(proposal.reason) : tr("本地策略未提供原因。")
+        var argumentSummary = proposal.argumentsSummary ? String(proposal.argumentsSummary) : "{}"
+        var source = proposal.source ? String(proposal.source) : "agent"
+        var provider = proposal.agentProvider ? String(proposal.agentProvider) : aiAgentClient.provider
+        var model = proposal.agentModel ? String(proposal.agentModel) : aiAgentClient.model
+
+        var detail = tr("未执行建议：%1").arg(summary)
+        detail += "\n" + tr("命令：%1").arg(command)
+        detail += "\n" + tr("参数：%1").arg(argumentSummary)
+        detail += "\n" + tr("来源：%1 %2/%3").arg(source).arg(provider).arg(model)
+        detail += "\n" + tr("Schema：%1").arg(validation)
+        detail += "\n" + tr("本地风险：%1").arg(risk)
+        detail += "\n" + tr("策略决策：%1").arg(decision)
+        detail += "\n" + tr("需要确认：%1").arg(requiresConfirmation)
+        detail += "\n" + tr("原因：%1").arg(reason)
+        detail += "\n" + tr("request_id：%1").arg(requestId)
+        detail += "\n" + tr("该proposal仅用于显示，本阶段不会转换为飞行动作。")
+
+        appendMessage("assistant", detail)
         return true
     }
 

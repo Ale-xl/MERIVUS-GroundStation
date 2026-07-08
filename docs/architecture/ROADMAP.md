@@ -227,6 +227,8 @@
 
 建议分支：`feat/ai-intent-policy`
 
+状态：completed
+
 任务：
 
 - 定义 `ActionProposal`。
@@ -390,6 +392,8 @@
 ## 阶段 14：模型 Provider
 
 建议分支：`feat/agent-model-providers`
+
+状态：not started
 
 任务：
 

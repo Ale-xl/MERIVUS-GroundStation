@@ -51,19 +51,15 @@
 
 文件：`custom/res/Merivus/MerivusAIAssistantPanel.qml`
 
-- 当前 QML 直接调用 Agent endpoint。
+- 当前 QML 默认路径不直接调用 Agent endpoint；Agent HTTP 由 C++ `AiAgentClient` 处理。
 - 当前支持 `takeoff`、`land`、`rtl`、`pause` intent。
-- 当前用户确认后直接调用：
-  - `vehicle.guidedModeTakeoff`
-  - `vehicle.guidedModeLand`
-  - `vehicle.guidedModeRTL`
-  - `vehicle.pauseVehicle`
+- 当前 AI 面板不会调用 `guidedModeTakeoff`、`guidedModeLand`、`guidedModeRTL` 或 `pauseVehicle`；飞行动作只显示为未执行建议。
 
 风险：
 
-- 白名单位于 QML，容易被 UI 逻辑绕过或扩散。
-- 风险级别、前置条件和审计没有统一 C++ 边界。
-- 第一版安全目标要求 AI 只输出建议，不执行飞行动作；当前实现已超过该边界。
+- AI proposal 白名单已收敛到 C++ `AiCommandPolicy`；QML 只显示本地判定结果。
+- 风险级别和基础审计已进入 C++；确认弹窗和执行前状态检查仍属于后续阶段。
+- 当前 AI 路径符合“只输出建议，不执行飞行动作”的第一版安全目标。
 
 ### 指挥中心面板
 
@@ -119,3 +115,16 @@
 - 是否保留 `SwarmController` legacy forwarding 逻辑，还是先隔离为开发调试功能。
 - 高风险命令确认弹窗的产品文案和验收标准。
 - 操作审计日志写入位置、保留时间和导出策略。
+
+## 阶段 6：AI 意图策略落地
+
+`feat/ai-intent-policy` 已把 Agent proposal 纳入 C++ 本地策略：
+
+- schema 失败、未知命令和危险结构均拒绝。
+- 风险级别由 QGC 本地计算，不信任 Agent 自报风险。
+- 高风险命令只显示为 `PreviewOnly` 或 `Deny`。
+- `param.write` 和 `mavlink.send_raw` 强制拒绝。
+- QML 只显示建议卡片，没有执行按钮。
+- 审计记录进入 `merivus.ai.policy`，不记录 Token、完整用户消息或敏感凭据。
+
+剩余风险仍包括非 AI 的指挥中心和 `SwarmController` 真实操作入口；这些不是本阶段新增能力，后续需要单独审计和确认框架。

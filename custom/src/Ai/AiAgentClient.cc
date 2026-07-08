@@ -1,5 +1,9 @@
 #include "AiAgentClient.h"
 
+#include "AiAuditEvent.h"
+#include "AiCommandPolicy.h"
+#include "AiSchemaValidator.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -292,19 +296,26 @@ void AiAgentClient::_handleChatReply(QNetworkReply* reply, const QByteArray& bod
         return;
     }
 
-    const QJsonValue proposalValue = object.value(QStringLiteral("proposal"));
-    QVariant proposal;
-    if (proposalValue.isObject()) {
-        proposal = proposalValue.toObject().toVariantMap();
-    } else if (!proposalValue.isNull() && !proposalValue.isUndefined()) {
-        _failRequest(requestId, QStringLiteral("invalid_proposal"), QStringLiteral("Agent proposal必须为对象或null。"), false);
-        return;
-    }
-
     const QString responseProvider = object.value(QStringLiteral("provider")).toString();
     const QString responseModel = object.value(QStringLiteral("model")).toString();
     if (!responseProvider.isEmpty() && !responseModel.isEmpty()) {
         _setInfo(responseProvider, responseModel, _serviceVersion);
+    }
+
+    const QJsonValue proposalValue = object.value(QStringLiteral("proposal"));
+    QVariant proposal;
+    if (proposalValue.isObject()) {
+        ActionProposal evaluatedProposal = AiSchemaValidator::validate(
+            requestId,
+            proposalValue,
+            responseProvider.isEmpty() ? _provider : responseProvider,
+            responseModel.isEmpty() ? _model : responseModel);
+        evaluatedProposal = AiCommandPolicy::evaluate(evaluatedProposal);
+        AiAuditEvent::recordProposal(evaluatedProposal, _sessionId);
+        proposal = evaluatedProposal.toVariantMap();
+    } else if (!proposalValue.isNull() && !proposalValue.isUndefined()) {
+        _failRequest(requestId, QStringLiteral("invalid_proposal"), QStringLiteral("Agent proposal必须为对象或null。"), false);
+        return;
     }
 
     _setAgentOnline(true);
