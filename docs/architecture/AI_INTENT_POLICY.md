@@ -143,3 +143,11 @@ AI 面板收到本地判定后的 proposal 后，只显示：动作、参数摘�
 - UI-only 命令仍只显示，不自动跳转或选机。
 - 高风险命令只预览，不执行。
 - 下一阶段建议进入确认/执行框架或继续安全策略细化；不建议直接进入真实模型 Provider。
+
+## Release 构建稳定性记录
+
+本阶段追加修复了 Qt 5.15.2 / MSVC Release 构建中的资源阶段假性崩溃。定位结果显示，最早失败点不是 `rcc`、`qmlcachegen` 或 AI 面板 QRC，而是生成 Makefile 后第一条 `cl.exe` 编译命令携带了过长的 `CXXFLAGS/CFLAGS + INCPATH`。`jom` 在该场景下返回 `-1073740791`，容易把最后打印的资源或 qmlcache 命令误判为根因；使用 `nmake` 可明确暴露 MSVC 命令行过长问题。
+
+修复只作用于仓库构建脚本和生成目录中的 Makefile：`tools/dev/build-merivus.ps1` 在 qmake 后生成 MSVC 响应文件，并将编译规则中的公共 flags/include path 改为 `@merivus_cl_*_common.rsp`。Quick Compiler 没有被全局关闭，Qt 安装目录没有修改，AI 面板仍通过独立 `merivus_ai_panel.qrc` 进入普通资源编译，未进入 qmlcache 映射。
+
+安全策略边界保持不变：`ActionProposal`、`AiSchemaValidator`、`AiCommandPolicy` 和 `AiAuditEvent` 未降低约束；高风险起飞类 proposal 仍只显示为未执行建议，`executable=false`，不调用 Vehicle、MAVLink、Swarm 或 PX4 执行入口，也不接入真实模型。

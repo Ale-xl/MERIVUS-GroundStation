@@ -452,3 +452,9 @@
 - AI 直接执行起飞、降落、返航。
 - 机载电脑、ROS、YOLO、视觉避障。
 - 商业计费、完整 Web Console、大规模遥测数据平台。
+
+## 构建稳定性补记：feat/ai-intent-policy
+
+阶段 6 的 AI 意图策略功能保持 completed。本次仅补齐 Release 构建稳定性：Qt 5.15.2 / MSVC 的生成 Makefile 在大型 QGC 工程中会形成超长 `cl.exe` 命令行，`jom` 可能以 `-1073740791` 崩溃并误导到资源或 qmlcache 阶段。构建脚本现在在 qmake 后为 MSVC 编译 flags 生成响应文件，并使用 `nmake` 执行 Release 构建，避免修改 Qt 安装目录或关闭 Quick Compiler。
+
+下一阶段仍建议进入 `feat/command-confirmation` 或继续细化本地安全策略；模型 Provider 阶段保持 not started，不建议直接接入真实模型。
