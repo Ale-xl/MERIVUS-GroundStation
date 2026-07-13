@@ -5,7 +5,7 @@ import pytest
 
 from app.providers.base import ProviderError
 from app.providers.ollama import OllamaProvider
-from app.proposal_normalizer import normalize_model_response, normalize_proposal
+from app.proposal_normalizer import classify_user_intent, normalize_model_response, normalize_proposal
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "model_eval_cases.json"
@@ -103,6 +103,39 @@ def test_missing_takeoff_altitude_is_not_defaulted():
 
     assert response.proposal.command == "vehicle.takeoff"
     assert response.proposal.arguments == {"vehicle_id": 1}
+
+
+def test_qa_fault_question_overrides_model_position_proposal():
+    response = normalize_model_response(
+        {
+            "reply": "未获得有效位置估计通常与GPS、EKF或传感器数据质量有关。",
+            "proposal": {"command": "vehicle.query_position", "arguments": {"vehicle_id": None}, "summary": "查询位置"},
+        },
+        user_message="未获得有效位置估计和EKF2报警是什么原因？",
+    )
+
+    assert response.proposal is None
+    assert "当前请求没有提供真实遥测" in response.reply
+
+
+def test_explicit_position_query_keeps_query_proposal():
+    response = normalize_model_response(
+        {
+            "reply": "准备查询一号机位置。",
+            "proposal": {"command": "vehicle.query_position", "arguments": {"vehicle_id": 1}, "summary": "查询一号机位置"},
+        },
+        user_message="查询一号机位置",
+    )
+
+    assert response.proposal is not None
+    assert response.proposal.command == "vehicle.query_position"
+    assert response.proposal.arguments == {"vehicle_id": 1}
+
+
+def test_intent_classifier_separates_qa_query_and_flight_request():
+    assert classify_user_intent("EKF2报警是什么意思？") == "log_explanation"
+    assert classify_user_intent("查询一号机位置") == "status_query"
+    assert classify_user_intent("让一号机起飞到10米") == "flight_proposal"
 
 
 def test_model_eval_fixture_has_required_shape_and_size():

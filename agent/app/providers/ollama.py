@@ -66,7 +66,7 @@ class OllamaProvider(AgentProvider):
         response = self._post_chat(payload)
         content = self._extract_message_content(response)
         data = self._parse_model_json(content)
-        return self._validated_response(data)
+        return self._validated_response(data, request.message)
 
     def _available_models(self) -> list[str]:
         try:
@@ -134,9 +134,9 @@ class OllamaProvider(AgentProvider):
         return data
 
     @staticmethod
-    def _validated_response(data: dict[str, Any]) -> AgentResponseData:
+    def _validated_response(data: dict[str, Any], request_message: str | None = None) -> AgentResponseData:
         try:
-            return normalize_model_response(data)
+            return normalize_model_response(data, user_message=request_message)
         except ValueError as exc:
             raise ProviderError("model_output_invalid_schema", str(exc)) from exc
 

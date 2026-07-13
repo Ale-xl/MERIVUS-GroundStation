@@ -164,6 +164,50 @@ FLIGHT_TARGET_COMMANDS = {
     "mission.start",
 }
 
+QA_PRIORITY_KEYWORDS = (
+    "是什么意思",
+    "什么原因",
+    "为什么",
+    "如何解释",
+    "解释一下",
+    "报警",
+    "报错",
+    "故障原因",
+    "原因",
+    "区别",
+    "作用",
+    "怎么办",
+    "ekf2",
+    "gps未定位",
+    "未获得有效位置估计",
+    "preflight fail",
+    "no gps",
+)
+
+EXPLICIT_QUERY_KEYWORDS = ("查询", "查看", "读取", "获取", "显示", "list", "status", "query")
+EXPLICIT_UI_KEYWORDS = ("选择", "打开")
+EXPLICIT_FLIGHT_KEYWORDS = (
+    "让",
+    "请",
+    "立即",
+    "执行",
+    "起飞",
+    "降落",
+    "返航",
+    "悬停",
+    "暂停",
+    "前往",
+    "飞到",
+    "上传任务",
+    "启动任务",
+    "takeoff",
+    "take off",
+    "land",
+    "rtl",
+    "return to launch",
+)
+FORBIDDEN_COMMAND_KEYWORDS = ("写px4参数", "发送mavlink", "shell", "绕过", "忽略白名单")
+
 
 @dataclass(frozen=True)
 class NormalizedProposalResult:
@@ -173,14 +217,44 @@ class NormalizedProposalResult:
     reason: str | None = None
 
 
-def normalize_model_response(data: dict[str, Any]) -> AgentResponseData:
+def normalize_model_response(data: dict[str, Any], user_message: str | None = None) -> AgentResponseData:
     reply = data.get("reply")
     if not isinstance(reply, str) or not reply.strip():
         raise ValueError("Model output must include a non-empty reply string")
 
     raw_proposal = data.get("proposal")
     result = normalize_proposal(raw_proposal, reply.strip())
+    if user_message and result.proposal is not None:
+        intent_type = classify_user_intent(user_message)
+        if _proposal_conflicts_with_intent(intent_type, result.proposal.command, user_message):
+            result = _no_structured_proposal(
+                _ensure_context_boundary(reply.strip()),
+                f"用户意图为 {intent_type}，不是明确指令",
+            )
     return AgentResponseData(reply=result.reply, proposal=result.proposal)
+
+
+def classify_user_intent(message: str) -> str:
+    normalized = message.strip().lower()
+    if not normalized:
+        return "answer_only"
+
+    if _contains_any(normalized, FORBIDDEN_COMMAND_KEYWORDS):
+        return "forbidden_command"
+
+    if _is_qa_or_log_explanation(normalized) and not _is_explicit_query(normalized):
+        return "log_explanation" if _looks_like_log_or_fault(normalized) else "answer_only"
+
+    if _is_explicit_ui_action(normalized):
+        return "ui_action"
+
+    if _is_explicit_flight_proposal(normalized):
+        return "flight_proposal"
+
+    if _is_explicit_query(normalized):
+        return "status_query"
+
+    return "answer_only"
 
 
 def normalize_proposal(raw_proposal: Any, reply: str) -> NormalizedProposalResult:
@@ -345,3 +419,64 @@ def _strip_dangerous_fields(value: Any) -> Any:
 def _no_structured_proposal(reply: str, reason: str) -> NormalizedProposalResult:
     suffix = f"\n\n无法形成结构化建议：{reason}。"
     return NormalizedProposalResult(reply=reply + suffix, proposal=None, normalized=False, reason=reason)
+
+
+def _proposal_conflicts_with_intent(intent_type: str, command: str, user_message: str) -> bool:
+    if intent_type in {"answer_only", "log_explanation"}:
+        return not _is_explicit_log_tool_request(user_message, command)
+    if intent_type == "status_query":
+        return command not in {
+            "vehicle.query_status",
+            "vehicle.query_battery",
+            "vehicle.query_position",
+            "vehicle.query_rtk",
+        }
+    if intent_type == "ui_action":
+        return command not in {"ui.select_vehicle", "ui.open_page", "map.focus_coordinate"}
+    if intent_type == "flight_proposal":
+        return command not in FLIGHT_TARGET_COMMANDS
+    return False
+
+
+def _is_qa_or_log_explanation(message: str) -> bool:
+    return _contains_any(message, QA_PRIORITY_KEYWORDS)
+
+
+def _looks_like_log_or_fault(message: str) -> bool:
+    return _contains_any(
+        message,
+        ("报警", "报错", "故障", "ekf2", "gps", "rtk", "preflight fail", "no gps", "日志", "log", "error", "fail"),
+    )
+
+
+def _is_explicit_query(message: str) -> bool:
+    if not _contains_any(message, EXPLICIT_QUERY_KEYWORDS):
+        return False
+    return _contains_any(
+        message,
+        ("状态", "电量", "位置", "gps", "rtk", "定位", "一号机", "二号机", "三号机", "无人机", "uav", "vehicle"),
+    )
+
+
+def _is_explicit_ui_action(message: str) -> bool:
+    return _contains_any(message, EXPLICIT_UI_KEYWORDS) and _contains_any(message, ("页面", "地图", "参数", "一号机", "二号机", "三号机"))
+
+
+def _is_explicit_flight_proposal(message: str) -> bool:
+    if _is_qa_or_log_explanation(message) and not message.startswith(("让", "请", "立即", "执行")):
+        return False
+    return _contains_any(message, EXPLICIT_FLIGHT_KEYWORDS)
+
+
+def _is_explicit_log_tool_request(message: str, command: str) -> bool:
+    return command == "log.explain_error" and _contains_any(message.lower(), ("解释日志", "分析日志", "log"))
+
+
+def _ensure_context_boundary(reply: str) -> str:
+    if any(marker in reply for marker in ("没有真实遥测", "缺少真实遥测", "请求上下文", "只能给出常见原因")):
+        return reply
+    return reply + "\n\n当前请求没有提供真实遥测、日志或传感器数据，因此只能给出常见原因和排查方向。"
+
+
+def _contains_any(message: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in message for keyword in keywords)

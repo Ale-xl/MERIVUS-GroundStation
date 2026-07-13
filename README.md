@@ -1,148 +1,116 @@
-# MERIVUS 无人机多机调度系统地面站
+# MERIVUS 无人机多机调度系统
 
-MERIVUS 是面向多无人机协同作业场景设计的地面站软件。项目基于完全开源的 QGroundControl 技术体系进行二次开发，结合自研多机调度交互、编队控制界面、4G/TCP 网络链路显示、飞控状态管理与任务规划能力，形成服务于无人机多机调度系统的专用操作平台。
+MERIVUS 是基于 QGroundControl、PX4、4G/TCP 链路、RTK 定位和本机 AI Agent 构建的无人机多机调度系统。当前仓库以 `MerivusGroundControl` 为核心，保留 QGC 上游工程结构，并在 `custom/`、`agent/`、`docs/`、`schemas/` 和 `configs/` 中沉淀 MERIVUS 的定制能力。
 
-本仓库为 MERIVUS Custom Build 的初始基线版本，重点沉淀地面站端 UI、调度交互、飞控链路、状态展示与后续智能化扩展能力。
+## 当前安全状态
 
-## 项目定位
+当前版本没有 AI 真实飞行动作执行能力。LLM/Agent 不能直接控制无人机，不能发送 MAVLink，不能修改 PX4 参数，也不能绕过 QGC 原生安全流程。
 
-MERIVUS 位于无人机系统的人机交互与任务调度层，负责连接操作者、飞控固件和网络通信链路：
+AI 只允许返回自然语言回答和可选 `ActionProposal`。所有 proposal 当前都由 QGC C++ 本地策略重新校验，最终 `executable=false`，仅用于展示和预览。QGC C++ 的 `AiSchemaValidator` 与 `AiCommandPolicy` 是当前 AI 链路的安全边界。
 
-```text
-操作者
-  -> MERIVUS 地面站
-  -> MAVLink / TCP 链路
-  -> 二次开发 PX4 飞控固件
-  -> 多架无人机执行单元
-```
+不要向仓库提交 `.env`、Token、API Key、厂商 PDF、DOCX、Excel、截图、Ollama 模型、模型权重、真实 RTSP 凭据、物联网卡敏感信息、build/dist/staging 产物或本地日志。
 
-系统目标不是替代飞控，而是在地面站侧提供更适合多机协同的任务组织、态势理解、指令预览、安全确认和状态回传能力。
+## 已实现能力
 
-## 开源基础与自主扩展
+- MERIVUS QGC Custom Build 主界面与多机调度 UI。
+- 本机 FastAPI Local Agent，提供 `/health`、`/merivus/info`、`/merivus/agent`。
+- `AiServiceSupervisor`，由 QGC 启动和守护本机 Agent。
+- `AiAgentClient`，由 QGC C++ 异步访问本机 Agent，QML 不直接发网络请求。
+- `MockProvider` 与 `OllamaProvider`，默认本地模型为 `qwen3:8b`。
+- QGC AI 面板 Provider 选择、Provider Ready/Error/Models 显示。
+- `ActionProposal`、schema 校验、本地风险和策略判定。
+- 问答/指令分离：解释类问题优先回答，不显示未执行建议卡片。
+- Agent Windows Release 打包 POC。
 
-MERIVUS 复用 QGroundControl 成熟的地面站架构、Qt/QML 组件、MAVLink 通信能力、Vehicle 模型、地图能力与飞控接入流程，并在此基础上进行面向多无人机调度系统的定制开发。
+## 系统组成
 
-核心技术基础：
+- `MerivusGroundControl`：基于 QGC 的地面站客户端。
+- `Merivus Local Agent`：本机 AI/规则服务，当前只运行在 `127.0.0.1`。
+- `Device Gateway`：后续设备接入与多设备链路网关。
+- `Cloud API`：后续账号、设备、审计、任务和遥测服务。
+- `Web Console`：后续运营与管理控制台。
+- `GIS Safety Service`：后续离线或服务端 GIS 安全分析。
+- `Media Service`：后续视频链路、转码、录像与回放服务。
+- `PX4 Flight Stack`：飞控固件与真实执行端，MERIVUS 不替代飞控安全逻辑。
 
-- Qt 5.15.2 / QML / qmake；
-- QGroundControl 原生控件、Palette、Vehicle 模型与地图能力；
-- MAVLink 飞控通信协议；
-- 二次开发 PX4 飞控固件；
-- 4G 网络链路与 TCP 通信状态接入；
-- Windows 开发环境与 Linux SITL 测试环境。
-
-MERIVUS 自主设计与开发的方向包括：
-
-- 多无人机编队与主从跟随任务；
-- 框选、复选和类 MOBA 的多机指点调度交互；
-- 航点队列与快速航线规划；
-- 多机参数快速调整；
-- 面向调度任务的专业化主界面；
-- 环境、姿态、IMU、电机、ESC、视频链路等状态聚合显示；
-- 安全界面和故障保护卡片的补充完善；
-- 后续 AI 助手、参数解释、日志解析和数据库能力。
-
-## 当前核心能力
-
-### 多机连接与链路状态
-
-系统面向多架无人机同时接入场景，区分飞控连接、MAVLink 链路、TCP 网络链路、无人机数量、GPS/RTK、告警、日志和时间等状态，避免将通信状态、飞控状态和 UI 状态混为一体。
-
-### 编队飞行
-
-支持以主 ID 无人机为参考对象组织编队任务。其他 ID 号无人机可跟随主 ID 号无人机执行编队飞行。默认任务轨迹以正方形航线为基础，后续可扩展更多编队队形、任务模板和安全校验策略。
-
-### 多机调度交互
-
-MERIVUS 针对多目标操作设计了更接近实时策略类软件的交互方式：
-
-- 地图框选无人机；
-- 复选目标无人机；
-- 对选中无人机执行指点飞行；
-- 保持选中范围、目标数量和系统 ID 可见；
-- 为批量指令保留确认、预览和结果回传空间。
-
-### 航点队列与航线规划
-
-支持按住 Shift 进行连续航点下发和队列式任务规划，用于快速构建多点航线。后续可进一步扩展为任务队列、批量航线、撤销/重排、失败重试和逐机结果追踪。
-
-### 高度、速度与任务参数调节
-
-支持一键调节或数值自由调节高度、低速等关键任务参数。参数展示与控制入口将逐步从零散浮层整理为统一的飞机参数信息区，提升多机操作时的可读性和一致性。
-
-### 环境、姿态与设备状态显示
-
-主界面规划并逐步整合以下信息：
-
-- 环境信息：温度、湿度、风速、垂直风速、风向和数据来源；
-- 姿态信息：水平仪、指南针、航向显示；
-- 传感器信息：IMU、加速度计等状态；
-- 动力信息：电机转速、电流、电压、ESC 状态和异常标记；
-- 视频信息：网络链路视频流显示区域；
-- 安全信息：故障保护、告警、日志与关键状态入口。
-
-### 安全与故障保护
-
-系统保留 QGC 对飞控安全流程的基本原则，并在 MERIVUS 界面中强化多机任务下的状态可见性。涉及起飞、降落、返航、编队、批量下发、参数写入等操作时，应坚持明确目标、明确范围、明确确认、明确结果的设计原则。
-
-## 后续规划
-
-### 智能体与 AI 助手
-
-计划在地面站中接入 AI 聊天框，用于解释系统状态、辅助理解参数、生成任务草案和提供操作建议。AI 输出不得直接进入飞控命令链路，必须经过结构化意图、规则校验、确定性预览和操作者确认。
+## AI 链路边界
 
 ```text
-自然语言
-  -> 结构化意图
-  -> 目标与安全校验
-  -> 指令预览
-  -> 操作者确认
-  -> 命令网关
-  -> QGC Vehicle / MAVLink API
-  -> 飞控执行与结果回传
+用户自然语言
+  -> QGC AI 面板
+  -> Merivus Local Agent
+  -> reply / ActionProposal
+  -> QGC C++ Schema Validator
+  -> QGC C++ Local Policy
+  -> 仅展示，不执行
 ```
 
-### 参数解释气泡
+当前不会进入：
 
-计划为飞控参数、配置项和关键状态增加全局半隐藏式说明气泡，类似浏览器翻译插件的轻量交互。用户选中参数后，可显示中文说明、来源、取值范围、风险提示和相关参考。
+```text
+ActionProposal -> Vehicle / MAVLink / Swarm / PX4
+```
 
-### 文本到飞控指令
-
-计划探索将受控输入文本转换为飞控操作意图。该能力必须限定在白名单命令、固定 schema、明确目标系统 ID、显式安全确认和完整审计记录之内，禁止将自由文本直接发送到 MAVLink 或 Vehicle 对象。
-
-### 数据库与离线导航
-
-计划接入数据库，用于保存软件登录账号、权限、操作审计、离线导航数据、任务记录和设备状态快照。离线位置解算、导航数据回放和历史任务查询可在此基础上扩展。
-
-### 飞行日志解析
-
-计划集成 log 日志解析能力，减少“下载日志再导入外部工具”的流程成本。后续可在地面站内完成日志索引、异常摘要、关键事件提取、曲线查看和任务复盘。
+后续如果进入命令确认或执行器阶段，必须先完成独立设计、审计、仿真验证和用户确认，不能从 LLM 输出直接接入真实飞控链路。
 
 ## 仓库结构
 
-MERIVUS 当前仍保留 QGC 上游目录结构，以降低二次开发、合并和验证成本。自定义扩展优先放置在 `custom/`、`custom/res/Merivus/`、`custom/src/`、`design-system/` 和项目文档目录中。
+- `custom/`：MERIVUS QGC Custom Build 入口、QML、资源和 C++ 扩展。
+- `agent/`：Merivus Local Agent、Provider、schema、测试和打包 spec。
+- `docs/`：架构、开发、硬件、流程和安全边界文档。
+- `schemas/`：跨语言 JSON Schema 契约草案。
+- `configs/`：配置模板和策略示例。
+- `tools/dev/`：Windows 构建、Agent 打包和局部测试脚本。
+- `src/`、`libs/`、`resources/`：QGroundControl 上游主体代码和资源。
 
-常用目录：
+更多说明见 [docs/INDEX.md](docs/INDEX.md)。
 
-- `custom/`：MERIVUS Custom Build 扩展入口；
-- `custom/res/Merivus/`：MERIVUS QML 主界面和定制组件；
-- `custom/src/`：MERIVUS C++ 扩展逻辑；
-- `design-system/`：界面设计规范；
-- `docs/`：开发、构建和工作流说明；
-- `tools/dev/`：开发环境检查与构建脚本。
+## 快速验证
 
-## 开发与验证原则
+Agent 单元测试：
 
-- QML 负责呈现、输入和轻量视图状态；
-- 目标解析、队列、验证、持久化、通信和异步任务应放在 C++ 控制器或服务中；
-- 多机命令不得隐式广播，必须携带冻结的目标系统 ID 集合；
-- 真实无人机不得用于自动化命令测试；
-- 命令路径验证优先使用 Mock Link、PX4 SITL 或 ArduPilot SITL；
-- 不提交密钥、证书、APN、SIM、生产坐标、账号密码和本地构建产物；
-- UI 必须避免仅靠颜色表达状态。
+```powershell
+cd agent
+python -m pytest
+```
 
-## 许可证与开源说明
+QGC AI 策略测试：
 
-MERIVUS 基于开源 QGroundControl 进行二次开发，并保留上游项目及第三方依赖的许可证约束。项目中的 QGC 原始代码、第三方库和 MERIVUS 定制代码的使用、分发和贡献规则请参见 [COPYING.md](COPYING.md) 与相关源文件中的许可证声明。
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/dev/test-ai-intent-policy.ps1
+```
 
-MERIVUS 的目标是在尊重开源协议的基础上形成面向多无人机调度系统的自主地面站软件。
+Agent Release 打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/dev/build-agent.ps1 -Configuration Release
+```
+
+MERIVUS Release 构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/dev/build-merivus.ps1 -Configuration Release
+```
+
+本机真实模型评估必须显式 opt-in：
+
+```powershell
+cd agent
+python tools/run_model_eval.py --run-real-model
+```
+
+## GitHub 提交卫生
+
+提交前至少检查：
+
+```powershell
+git status --short
+git status --ignored --short
+git diff --check
+```
+
+仓库应只提交源码、文档、schema、示例配置和必要资源；本地构建产物、模型、密钥、真实设备凭据和厂商手册必须留在 Git 外。
+
+## 许可证与上游
+
+MERIVUS 基于开源 QGroundControl 二次开发，并保留上游项目和第三方依赖的许可证约束。相关规则见 [COPYING.md](COPYING.md) 与源文件中的许可证声明。

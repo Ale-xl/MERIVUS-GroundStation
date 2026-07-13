@@ -522,3 +522,23 @@
 - 不写 `.env`、不记录 token、不自动安装或 pull 模型、不开放 LAN 监听。
 
 下一步建议：继续本地 Qwen3 prompt/eval 迭代和 GUI 人工冒烟；暂不进入云 Provider、MCP 或命令执行器。
+
+## 阶段 14.7：AI 问答与指令分离 / 仓库清理
+
+分支：`feat/ai-qa-intent-separation-and-repo-cleanup`
+状态：completed。
+
+任务：
+
+- 修复解释类问答被误判为查询 proposal 的问题。
+- 中文化 AI 建议卡片中的用户可见字段。
+- 补充纯问答评估集。
+- 整理 README、文档索引、开发说明、schema 和配置模板。
+- 检查仓库忽略规则和 GitHub 推送卫生。
+
+验收：
+
+- “未获得有效位置估计和EKF2报警是什么原因？” 返回中文解释，`proposal=null`。
+- 明确查询和飞行动作建议仍可生成 proposal。
+- 所有 proposal 仍保持 `executable=false`。
+- 不新增真实飞行动作执行链路。

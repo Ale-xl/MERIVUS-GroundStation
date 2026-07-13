@@ -441,31 +441,89 @@ Item {
         ]
     }
 
+    function localizedValidationStatus(value) {
+        var map = {
+            "Valid": tr("通过"),
+            "InvalidSchema": tr("结构无效"),
+            "MissingCommand": tr("缺少命令"),
+            "InvalidArguments": tr("参数无效"),
+            "UnknownCommand": tr("未知命令")
+        }
+        return map[value] || value
+    }
+
+    function localizedPolicyDecision(value) {
+        var map = {
+            "AllowReadOnly": tr("允许只读"),
+            "AllowUiOnly": tr("允许界面建议"),
+            "PreviewOnly": tr("仅预览"),
+            "RequiresConfirmation": tr("需要确认"),
+            "Deny": tr("拒绝")
+        }
+        return map[value] || value
+    }
+
+    function localizedRiskLevel(value) {
+        var map = {
+            "Informational": tr("信息"),
+            "Low": tr("低"),
+            "Medium": tr("中"),
+            "High": tr("高"),
+            "Critical": tr("严重")
+        }
+        return map[value] || value
+    }
+
+    function localizedPolicyReason(value) {
+        var map = {
+            "No structured proposal to evaluate.": tr("没有需要评估的结构化建议。"),
+            "Schema validation failed.": tr("结构校验失败。"),
+            "Read-only proposal allowed for display only.": tr("只读建议仅允许展示，不会执行飞行动作。"),
+            "UI-only proposal is allowed for display only; no UI action is executed in this phase.": tr("界面建议仅允许展示，当前阶段不会自动操作界面。"),
+            "Mission proposal may be previewed only; no upload or execution is available.": tr("任务建议仅允许预览，当前阶段不会上传或执行任务。"),
+            "Command is denied by local policy.": tr("本地策略拒绝该命令。"),
+            "Flight-affecting command is preview-only; MERIVUS does not execute AI flight actions.": tr("当前版本禁止 AI 执行飞行动作，该建议仅用于预览。"),
+            "Unknown command denied by local policy.": tr("未知命令已被本地策略拒绝。"),
+            "ui.open_page requires a short page argument.": tr("打开页面建议需要有效的页面参数。"),
+            "vehicle_id must be a positive integer.": tr("vehicle_id 必须是正整数。"),
+            "vehicle_id is required and must be a positive integer.": tr("必须提供正整数 vehicle_id。"),
+            "latitude and longitude must be valid WGS84 coordinates.": tr("latitude 和 longitude 必须是有效 WGS84 坐标。"),
+            "altitude_m must be between 0 and 120.": tr("altitude_m 必须在 0 到 120 米之间。"),
+            "takeoff altitude_m must be > 0 and <= 120.": tr("起飞高度 altitude_m 必须大于 0 且不超过 120 米。"),
+            "param.write requires name and value for preview, but remains denied.": tr("参数写入建议需要 name 和 value，但本地策略仍会拒绝。"),
+            "raw MAVLink arguments are not accepted.": tr("不接受原始 MAVLink 参数。")
+        }
+        return map[value] || value
+    }
+
     function handleAgentProposal(proposal, requestId) {
         if (!proposal || typeof proposal !== "object") return false
 
         var command = proposal.command ? String(proposal.command) : tr("未知建议")
         var summary = proposal.summary ? String(proposal.summary) : tr("Agent返回了结构化建议，但未提供摘要。")
-        var validation = proposal.validationStatus ? String(proposal.validationStatus) : tr("InvalidSchema")
-        var decision = proposal.policyDecision ? String(proposal.policyDecision) : tr("Deny")
-        var risk = proposal.localRisk ? String(proposal.localRisk) : tr("Critical")
+        var validation = proposal.validationStatus ? localizedValidationStatus(String(proposal.validationStatus)) : tr("结构无效")
+        var decision = proposal.policyDecision ? localizedPolicyDecision(String(proposal.policyDecision)) : tr("拒绝")
+        var risk = proposal.localRisk ? localizedRiskLevel(String(proposal.localRisk)) : tr("严重")
         var requiresConfirmation = proposal.requiresConfirmation === true ? tr("是") : tr("否")
-        var reason = proposal.reason ? String(proposal.reason) : tr("本地策略未提供原因。")
+        var executable = proposal.executable === true ? tr("是") : tr("否")
+        var reason = proposal.reason ? localizedPolicyReason(String(proposal.reason)) : tr("本地策略未提供原因。")
         var argumentSummary = proposal.argumentsSummary ? String(proposal.argumentsSummary) : "{}"
         var source = proposal.source ? String(proposal.source) : "agent"
         var provider = proposal.agentProvider ? String(proposal.agentProvider) : aiAgentClient.provider
         var model = proposal.agentModel ? String(proposal.agentModel) : aiAgentClient.model
 
-        var detail = tr("未执行建议：%1").arg(summary)
-        detail += "\n" + tr("命令：%1").arg(command)
-        detail += "\n" + tr("参数：%1").arg(argumentSummary)
+        var detail = tr("建议状态：未执行")
+        detail += "\n" + tr("建议摘要：%1").arg(summary)
+        detail += "\n" + tr("建议命令：%1").arg(command)
+        detail += "\n" + tr("参数摘要：%1").arg(argumentSummary)
         detail += "\n" + tr("来源：%1 %2/%3").arg(source).arg(provider).arg(model)
-        detail += "\n" + tr("Schema：%1").arg(validation)
+        detail += "\n" + tr("结构校验：%1").arg(validation)
         detail += "\n" + tr("本地风险：%1").arg(risk)
-        detail += "\n" + tr("策略决策：%1").arg(decision)
-        detail += "\n" + tr("需要确认：%1").arg(requiresConfirmation)
+        detail += "\n" + tr("本地策略：%1").arg(decision)
+        detail += "\n" + tr("是否需要确认：%1").arg(requiresConfirmation)
+        detail += "\n" + tr("是否可执行：%1").arg(executable)
         detail += "\n" + tr("原因：%1").arg(reason)
-        detail += "\n" + tr("request_id：%1").arg(requestId)
+        detail += "\n" + tr("请求编号：%1").arg(requestId)
         detail += "\n" + tr("该proposal仅用于显示，本阶段不会转换为飞行动作。")
 
         appendMessage("assistant", detail)

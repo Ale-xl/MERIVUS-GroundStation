@@ -122,5 +122,5 @@ private:
 
     static constexpr int kHealthTimeoutMs = 2000;
     static constexpr int kInfoTimeoutMs = 3000;
-    static constexpr int kChatTimeoutMs = 15000;
+    static constexpr int kChatTimeoutMs = 60000;
 };

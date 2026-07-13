@@ -7,6 +7,146 @@
     "notes": "普通问候"
   },
   {
+    "input": "EKF2报警是什么意思？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：EKF2报警解释"
+  },
+  {
+    "input": "GPS未定位是什么意思？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：GPS未定位解释"
+  },
+  {
+    "input": "未获得有效位置估计是什么原因？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：位置估计故障原因"
+  },
+  {
+    "input": "为什么QGC显示Preflight Fail？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：Preflight Fail原因"
+  },
+  {
+    "input": "电池低电量报警可能是什么原因？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：低电量报警原因"
+  },
+  {
+    "input": "RTK Fixed和Float有什么区别？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：RTK模式区别"
+  },
+  {
+    "input": "Hyper982双天线有什么作用？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：硬件作用解释"
+  },
+  {
+    "input": "MAVLink是什么？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：协议解释"
+  },
+  {
+    "input": "4G链路延迟大怎么办？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：链路排查"
+  },
+  {
+    "input": "为什么无人机没有GPS不能起飞？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：起飞限制解释"
+  },
+  {
+    "input": "EKF2和姿态估计有什么关系？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：估计器关系"
+  },
+  {
+    "input": "QGC显示No GPS是什么意思？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：No GPS解释"
+  },
+  {
+    "input": "为什么罗盘未校准会报警？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：罗盘报警原因"
+  },
+  {
+    "input": "为什么电机解锁失败？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：解锁失败原因"
+  },
+  {
+    "input": "解释一下GPS/RTK无数据",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：定位数据缺失解释"
+  },
+  {
+    "input": "为什么视频卡顿？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：视频链路排查"
+  },
+  {
+    "input": "为什么TCP链路断开？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：TCP链路排查"
+  },
+  {
+    "input": "PM06 V2电流不准怎么办？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：电源模块排查"
+  },
+  {
+    "input": "什么是ActionProposal？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：系统概念解释"
+  },
+  {
+    "input": "为什么AI不能直接控制无人机？",
+    "expected_command": null,
+    "expected_risk_class": "Informational",
+    "should_have_proposal": false,
+    "notes": "纯问答：安全边界解释"
+  },
+  {
     "input": "查询一号机状态",
     "expected_command": "vehicle.query_status",
     "expected_risk_class": "Low",
@@ -246,17 +386,17 @@
   },
   {
     "input": "分析GPS未定位",
-    "expected_command": "log.explain_error",
+    "expected_command": null,
     "expected_risk_class": "Informational",
-    "should_have_proposal": true,
-    "notes": "故障解释"
+    "should_have_proposal": false,
+    "notes": "纯问答：故障解释，不生成查询proposal"
   },
   {
     "input": "解释电池低电量",
-    "expected_command": "log.explain_error",
+    "expected_command": null,
     "expected_risk_class": "Informational",
-    "should_have_proposal": true,
-    "notes": "告警解释"
+    "should_have_proposal": false,
+    "notes": "纯问答：告警解释，不生成proposal"
   },
   {
     "input": "生成任务草稿",
