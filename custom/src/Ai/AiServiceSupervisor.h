@@ -41,6 +41,11 @@ public:
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString programPath READ programPath NOTIFY programPathChanged)
     Q_PROPERTY(QString workingDirectory READ workingDirectory NOTIFY workingDirectoryChanged)
+    Q_PROPERTY(QString provider READ provider WRITE setProvider NOTIFY providerSettingsChanged)
+    Q_PROPERTY(QString ollamaBaseUrl READ ollamaBaseUrl WRITE setOllamaBaseUrl NOTIFY providerSettingsChanged)
+    Q_PROPERTY(QString ollamaModel READ ollamaModel WRITE setOllamaModel NOTIFY providerSettingsChanged)
+    Q_PROPERTY(int ollamaTimeoutSeconds READ ollamaTimeoutSeconds WRITE setOllamaTimeoutSeconds NOTIFY providerSettingsChanged)
+    Q_PROPERTY(bool allowMockFallback READ allowMockFallback WRITE setAllowMockFallback NOTIFY providerSettingsChanged)
 
     bool enabled() const { return _enabled; }
     bool autoStart() const { return _autoStart; }
@@ -53,9 +58,19 @@ public:
     QString lastError() const { return _lastError; }
     QString programPath() const { return _programPath; }
     QString workingDirectory() const { return _workingDirectory; }
+    QString provider() const { return _provider; }
+    QString ollamaBaseUrl() const { return _ollamaBaseUrl; }
+    QString ollamaModel() const { return _ollamaModel; }
+    int ollamaTimeoutSeconds() const { return _ollamaTimeoutSeconds; }
+    bool allowMockFallback() const { return _allowMockFallback; }
 
     void setEnabled(bool enabled);
     void setAutoStart(bool autoStart);
+    void setProvider(const QString& provider);
+    void setOllamaBaseUrl(const QString& baseUrl);
+    void setOllamaModel(const QString& model);
+    void setOllamaTimeoutSeconds(int seconds);
+    void setAllowMockFallback(bool allow);
 
     Q_INVOKABLE void ensureRunning();
     Q_INVOKABLE void startAgent();
@@ -75,6 +90,7 @@ signals:
     void lastErrorChanged();
     void programPathChanged();
     void workingDirectoryChanged();
+    void providerSettingsChanged();
     void localTokenChanged(const QString& token);
 
     void agentStarted();
@@ -122,6 +138,9 @@ private:
     void _setLastError(const QString& message);
     void _setProgramPath(const QString& path);
     void _setWorkingDirectory(const QString& path);
+    QString _normalizedProvider(const QString& provider) const;
+    QString _normalizedOllamaBaseUrl(const QString& baseUrl) const;
+    QString _normalizedOllamaModel(const QString& model) const;
 
     QNetworkAccessManager _networkManager;
     QProcess _process;
@@ -146,6 +165,11 @@ private:
     QString _programPath;
     QString _workingDirectory;
     QString _localToken;
+    QString _provider = QStringLiteral("mock");
+    QString _ollamaBaseUrl = QStringLiteral("http://127.0.0.1:11434");
+    QString _ollamaModel = QStringLiteral("qwen3:8b");
+    int _ollamaTimeoutSeconds = 60;
+    bool _allowMockFallback = false;
 
     static constexpr int kHealthTimeoutMs = 2000;
     static constexpr int kStartupPollMs = 500;

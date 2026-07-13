@@ -51,6 +51,11 @@ Item {
     AiServiceSupervisor {
         id: aiSupervisor
         enabled: assistantSettings.agentEnabled
+        provider: assistantSettings.agentProvider
+        ollamaBaseUrl: assistantSettings.ollamaBaseUrl
+        ollamaModel: assistantSettings.ollamaModel
+        ollamaTimeoutSeconds: assistantSettings.ollamaTimeoutSeconds
+        allowMockFallback: assistantSettings.allowMockFallback
 
         onAgentHealthy: {
             aiAgentClient.checkHealth()
@@ -109,6 +114,11 @@ Item {
         property bool agentEnabled: false
         property bool developerEnableAiFlightExecution: false
         property string agentEndpoint: "http://127.0.0.1:8765"
+        property string agentProvider: "mock"
+        property string ollamaBaseUrl: "http://127.0.0.1:11434"
+        property string ollamaModel: "qwen3:8b"
+        property int ollamaTimeoutSeconds: 60
+        property bool allowMockFallback: false
         property int maxMessages: 80
     }
 
@@ -134,13 +144,41 @@ Item {
         return Math.max(minValue, Math.min(maxValue, value))
     }
 
+    function currentProviderIndex() {
+        return assistantSettings.agentProvider === "ollama" ? 1 : 0
+    }
+
+    function applyAgentProviderSettings() {
+        aiSupervisor.provider = assistantSettings.agentProvider
+        aiSupervisor.ollamaBaseUrl = assistantSettings.ollamaBaseUrl
+        aiSupervisor.ollamaModel = assistantSettings.ollamaModel
+        aiSupervisor.ollamaTimeoutSeconds = assistantSettings.ollamaTimeoutSeconds
+        aiSupervisor.allowMockFallback = assistantSettings.allowMockFallback
+
+        if (!assistantSettings.agentEnabled) {
+            return
+        }
+
+        if (aiSupervisor.healthReady && !aiSupervisor.ownsProcess) {
+            appendMessage("assistant", tr("当前Agent不是由MERIVUS启动，无法自动切换Provider。请手动停止外部Agent后重试，或确认外部Agent已使用目标Provider启动。"))
+            aiAgentClient.loadInfo()
+            return
+        }
+
+        if (aiSupervisor.healthReady || aiSupervisor.processRunning) {
+            aiSupervisor.restartAgent()
+        } else {
+            aiSupervisor.ensureRunning()
+        }
+    }
+
     function resetPanelLayoutIfNeeded() {
         if (!parent || parent.height <= 0) return
-        if (assistantSettings.layoutVersion < 5) {
+        if (assistantSettings.layoutVersion < 6) {
             assistantSettings.panelWidth = defaultPanelWidth
             assistantSettings.panelHeight = defaultPanelHeight
             assistantSettings.panelTopMargin = defaultPanelTopMargin
-            assistantSettings.layoutVersion = 5
+            assistantSettings.layoutVersion = 6
         }
     }
 
@@ -446,6 +484,13 @@ Item {
             return
         }
 
+        if (!aiAgentClient.providerReady) {
+            var providerMessage = aiAgentClient.providerError.length > 0 ? aiAgentClient.providerError : tr("当前Provider尚未就绪。请检查本机模型服务或切回Mock。")
+            appendMessage("assistant", tr("Provider未就绪：%1").arg(providerMessage))
+            aiAgentClient.loadInfo()
+            return
+        }
+
         appendMessage("assistant", tr("正在连接本机 Agent：%1").arg(aiAgentClient.endpoint))
         aiAgentClient.sendMessage(clean, agentContext(), allowedAgentCapabilities())
     }
@@ -717,67 +762,185 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.settingsOpen ? 316 : 0
+                Layout.preferredHeight: root.settingsOpen ? Math.min(500, Math.max(360, root.panelHeight - 184)) : 0
                 visible: root.settingsOpen
                 radius: 7
                 color: Qt.rgba(qgcPal.windowShade.r, qgcPal.windowShade.g, qgcPal.windowShade.b, 0.88)
                 border.color: Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.12)
                 clip: true
 
-                ColumnLayout {
+                Flickable {
                     anchors.fill: parent
                     anchors.margins: 10
-                    spacing: 7
+                    clip: true
+                    contentWidth: width
+                    contentHeight: settingsColumn.implicitHeight
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    ScrollBar.vertical: ScrollBar { }
+
+                    ColumnLayout {
+                        id: settingsColumn
+                        width: parent.width
+                        spacing: 7
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            QGCCheckBox {
+                                id: agentSwitch
+                                text: tr("启用本机智能体")
+                                checked: assistantSettings.agentEnabled
+                                onClicked: {
+                                    assistantSettings.agentEnabled = checked
+                                    if (checked) {
+                                        aiSupervisor.ensureRunning()
+                                    } else {
+                                        aiSupervisor.stopAgent()
+                                        aiAgentClient.clearLocalToken()
+                                    }
+                                }
+                            }
+                            QGCLabel {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignRight
+                                text: agentRequestRunning ? tr("请求中") : aiSupervisor.stateText
+                                color: agentRequestRunning || aiSupervisor.state === AiServiceSupervisor.Checking || aiSupervisor.state === AiServiceSupervisor.Starting
+                                       ? qgcPal.colorOrange
+                                       : aiSupervisor.healthReady ? qgcPal.colorGreen : qgcPal.colorGrey
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        QGCLabel {
+                            Layout.fillWidth: true
+                            text: tr("地址：%1").arg(aiAgentClient.endpoint)
+                            color: qgcPal.text
+                            font.pixelSize: 12
+                        }
+
+                        QGCLabel {
+                            Layout.fillWidth: true
+                            text: aiSupervisor.lastError.length > 0 ? tr("状态：%1").arg(aiSupervisor.lastError)
+                                                                    : tr("状态：%1").arg(aiSupervisor.stateText)
+                            color: aiSupervisor.state === AiServiceSupervisor.PortConflict ||
+                                   aiSupervisor.state === AiServiceSupervisor.Error ||
+                                   aiSupervisor.state === AiServiceSupervisor.NotInstalled ||
+                                   aiSupervisor.state === AiServiceSupervisor.Crashed ? qgcPal.warningText : qgcPal.text
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
 
                     RowLayout {
                         Layout.fillWidth: true
-                        QGCCheckBox {
-                            id: agentSwitch
-                            text: tr("启用本机智能体")
-                            checked: assistantSettings.agentEnabled
-                            onClicked: {
-                                assistantSettings.agentEnabled = checked
-                                if (checked) {
-                                    aiSupervisor.ensureRunning()
-                                } else {
-                                    aiSupervisor.stopAgent()
-                                    aiAgentClient.clearLocalToken()
+                        QGCLabel {
+                            Layout.preferredWidth: 72
+                            text: tr("Provider")
+                            color: qgcPal.text
+                            font.pixelSize: 12
+                        }
+                        QGCComboBox {
+                            Layout.preferredWidth: 118
+                            model: [ tr("Mock"), tr("Ollama") ]
+                            currentIndex: root.currentProviderIndex()
+                            onActivated: {
+                                var nextProvider = currentIndex === 1 ? "ollama" : "mock"
+                                if (assistantSettings.agentProvider !== nextProvider) {
+                                    assistantSettings.agentProvider = nextProvider
+                                    root.applyAgentProviderSettings()
                                 }
                             }
                         }
                         QGCLabel {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignRight
-                            text: agentRequestRunning ? tr("请求中") : aiSupervisor.stateText
-                            color: agentRequestRunning || aiSupervisor.state === AiServiceSupervisor.Checking || aiSupervisor.state === AiServiceSupervisor.Starting
-                                   ? qgcPal.colorOrange
-                                   : aiSupervisor.healthReady ? qgcPal.colorGreen : qgcPal.colorGrey
+                            text: aiSupervisor.ownsProcess ? tr("MERIVUS托管") : tr("外部Agent")
+                            color: aiSupervisor.ownsProcess ? qgcPal.colorGreen : qgcPal.colorOrange
                             font.pixelSize: 11
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCLabel {
+                            Layout.preferredWidth: 72
+                            text: tr("模型")
+                            color: qgcPal.text
+                            font.pixelSize: 12
+                        }
+                        QGCTextField {
+                            id: ollamaModelField
+                            Layout.fillWidth: true
+                            text: assistantSettings.ollamaModel
+                            enabled: assistantSettings.agentProvider === "ollama"
+                            font.pixelSize: 12
+                            onEditingFinished: {
+                                var value = text.trim()
+                                assistantSettings.ollamaModel = value.length > 0 ? value : "qwen3:8b"
+                                text = assistantSettings.ollamaModel
+                                root.applyAgentProviderSettings()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCLabel {
+                            Layout.preferredWidth: 72
+                            text: tr("Ollama")
+                            color: qgcPal.text
+                            font.pixelSize: 12
+                        }
+                        QGCTextField {
+                            id: ollamaBaseUrlField
+                            Layout.fillWidth: true
+                            text: assistantSettings.ollamaBaseUrl
+                            enabled: assistantSettings.agentProvider === "ollama"
+                            font.pixelSize: 12
+                            onEditingFinished: {
+                                assistantSettings.ollamaBaseUrl = text.trim().length > 0 ? text.trim() : "http://127.0.0.1:11434"
+                                text = assistantSettings.ollamaBaseUrl
+                                root.applyAgentProviderSettings()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QGCLabel {
+                            Layout.preferredWidth: 72
+                            text: tr("超时")
+                            color: qgcPal.text
+                            font.pixelSize: 12
+                        }
+                        QGCTextField {
+                            Layout.preferredWidth: 58
+                            text: String(assistantSettings.ollamaTimeoutSeconds)
+                            enabled: assistantSettings.agentProvider === "ollama"
+                            horizontalAlignment: Text.AlignHCenter
+                            font.pixelSize: 12
+                            validator: IntValidator { bottom: 1; top: 300 }
+                            onEditingFinished: {
+                                var seconds = parseInt(text)
+                                if (isNaN(seconds)) seconds = 60
+                                assistantSettings.ollamaTimeoutSeconds = root.clamp(seconds, 1, 300)
+                                text = String(assistantSettings.ollamaTimeoutSeconds)
+                                root.applyAgentProviderSettings()
+                            }
+                        }
+                        QGCCheckBox {
+                            Layout.fillWidth: true
+                            text: tr("允许Mock回退")
+                            checked: assistantSettings.allowMockFallback
+                            onClicked: {
+                                assistantSettings.allowMockFallback = checked
+                                root.applyAgentProviderSettings()
+                            }
                         }
                     }
 
                     QGCLabel {
                         Layout.fillWidth: true
-                        text: tr("地址：%1").arg(aiAgentClient.endpoint)
-                        color: qgcPal.text
-                        font.pixelSize: 12
-                    }
-
-                    QGCLabel {
-                        Layout.fillWidth: true
-                        text: aiSupervisor.lastError.length > 0 ? tr("状态：%1").arg(aiSupervisor.lastError)
-                                                                : tr("状态：%1").arg(aiSupervisor.stateText)
-                        color: aiSupervisor.state === AiServiceSupervisor.PortConflict ||
-                               aiSupervisor.state === AiServiceSupervisor.Error ||
-                               aiSupervisor.state === AiServiceSupervisor.NotInstalled ||
-                               aiSupervisor.state === AiServiceSupervisor.Crashed ? qgcPal.warningText : qgcPal.text
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                    }
-
-                    QGCLabel {
-                        Layout.fillWidth: true
-                        text: tr("Provider/Model：%1 / %2").arg(aiAgentClient.provider).arg(aiAgentClient.model)
+                        text: tr("当前Provider/Model：%1 / %2").arg(aiAgentClient.provider).arg(aiAgentClient.model)
                         color: qgcPal.text
                         font.pixelSize: 12
                     }
@@ -837,7 +1000,7 @@ Item {
                             Layout.fillWidth: true
                             text: tr("重启Agent")
                             enabled: assistantSettings.agentEnabled
-                            onClicked: aiSupervisor.restartAgent()
+                            onClicked: root.applyAgentProviderSettings()
                         }
                         QGCButton {
                             Layout.fillWidth: true
@@ -845,6 +1008,7 @@ Item {
                             onClicked: root.appendMessage("assistant", root._agentGuide)
                         }
                     }
+                }
                 }
             }
 

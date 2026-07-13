@@ -500,3 +500,25 @@
 ## 阶段 7 状态提醒：命令确认/执行器
 
 `feat/command-confirmation` 仍未开始。本阶段没有新增 `AiCommandExecutor`，也没有任何真实飞行动作执行能力。
+
+## 阶段 14.6：QGC Agent Provider 设置
+
+分支：`feat/agent-provider-settings`
+状态：completed。
+
+任务：
+
+- 在 QGC AI 面板中提供 Mock/Ollama Provider 选择。
+- 默认 Ollama 模型为 `qwen3:8b`，默认地址为 `http://127.0.0.1:11434`。
+- 由 `AiServiceSupervisor` 启动自托管 Agent 时注入 Provider/Ollama 环境变量。
+- 外部 Agent 复用模式只显示实际 `/merivus/info` 状态，不杀进程、不修改 Provider。
+- Provider 未就绪时，聊天入口给出清晰提示。
+
+验收：
+
+- Mock 和 Ollama 设置均可在 GUI 中显示和切换。
+- Agent 单元测试、`AiIntentPolicyTest`、Agent Release 打包和 MERIVUS Release 构建通过。
+- 安全关键字回归确认未新增真实执行链路。
+- 不写 `.env`、不记录 token、不自动安装或 pull 模型、不开放 LAN 监听。
+
+下一步建议：继续本地 Qwen3 prompt/eval 迭代和 GUI 人工冒烟；暂不进入云 Provider、MCP 或命令执行器。

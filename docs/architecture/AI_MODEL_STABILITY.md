@@ -81,3 +81,9 @@
 
 当前真实 `qwen3:8b` 评估仍未达到全通过：52 条样例中 command 匹配 28 条，proposal 形态匹配 29 条。失败主要集中在模型仍倾向于把状态查询、日志解释、任务分析或高风险动作回答成纯文本。后续建议继续优先做 prompt/eval 迭代，而不是进入云 Provider 或真实执行链路。
 
+## GUI Provider 设置补充：feat/agent-provider-settings
+
+本阶段之后，QGC AI 面板可以选择 `Mock` 或 `Ollama`，并把 `qwen3:8b`、Ollama 本机地址、超时和 fallback 设置传给由 QGC 自己启动的 Local Agent。该改动只影响 Agent 启动环境和 GUI 状态展示，不改变模型 normalizer、ActionProposal 策略或真实飞行动作边界。
+
+当 `/merivus/info` 返回 `provider_ready=false` 时，QGC 聊天入口会提示 Provider 未就绪并停止发送 Agent 请求，避免把未启动的 Ollama 或缺失模型表现成普通聊天失败。
+

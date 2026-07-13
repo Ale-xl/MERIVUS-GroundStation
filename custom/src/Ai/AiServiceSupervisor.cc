@@ -9,6 +9,7 @@
 #include <QJsonParseError>
 #include <QNetworkRequest>
 #include <QProcessEnvironment>
+#include <QtGlobal>
 #include <QUuid>
 
 namespace {
@@ -174,6 +175,60 @@ void AiServiceSupervisor::setAutoStart(bool autoStart)
     emit autoStartChanged();
 }
 
+void AiServiceSupervisor::setProvider(const QString& provider)
+{
+    const QString normalized = _normalizedProvider(provider);
+    if (_provider == normalized) {
+        return;
+    }
+
+    _provider = normalized;
+    emit providerSettingsChanged();
+}
+
+void AiServiceSupervisor::setOllamaBaseUrl(const QString& baseUrl)
+{
+    const QString normalized = _normalizedOllamaBaseUrl(baseUrl);
+    if (_ollamaBaseUrl == normalized) {
+        return;
+    }
+
+    _ollamaBaseUrl = normalized;
+    emit providerSettingsChanged();
+}
+
+void AiServiceSupervisor::setOllamaModel(const QString& model)
+{
+    const QString normalized = _normalizedOllamaModel(model);
+    if (_ollamaModel == normalized) {
+        return;
+    }
+
+    _ollamaModel = normalized;
+    emit providerSettingsChanged();
+}
+
+void AiServiceSupervisor::setOllamaTimeoutSeconds(int seconds)
+{
+    const int normalized = qBound(1, seconds, 300);
+    if (_ollamaTimeoutSeconds == normalized) {
+        return;
+    }
+
+    _ollamaTimeoutSeconds = normalized;
+    emit providerSettingsChanged();
+}
+
+void AiServiceSupervisor::setAllowMockFallback(bool allow)
+{
+    if (_allowMockFallback == allow) {
+        return;
+    }
+
+    _allowMockFallback = allow;
+    emit providerSettingsChanged();
+}
+
 void AiServiceSupervisor::ensureRunning()
 {
     if (!_enabled) {
@@ -226,6 +281,12 @@ void AiServiceSupervisor::restartAgent()
 {
     clearError();
     _setRestartCount(0);
+
+    if (!_ownsProcess && _healthReady) {
+        _setLastError(QStringLiteral("当前Agent不是由MERIVUS启动，无法自动切换Provider；请手动停止外部Agent后重试。"));
+        _requestHealth(HealthPurpose::Manual);
+        return;
+    }
 
     if (_ownsProcess && _process.state() != QProcess::NotRunning) {
         stopAgent();
@@ -420,6 +481,11 @@ void AiServiceSupervisor::_startResolvedAgent()
     environment.insert(QStringLiteral("MERIVUS_AGENT_HOST"), QStringLiteral("127.0.0.1"));
     environment.insert(QStringLiteral("MERIVUS_AGENT_PORT"), QStringLiteral("8765"));
     environment.insert(QStringLiteral("MERIVUS_LOCAL_TOKEN"), _localToken);
+    environment.insert(QStringLiteral("MERIVUS_AGENT_PROVIDER"), _provider);
+    environment.insert(QStringLiteral("MERIVUS_OLLAMA_BASE_URL"), _ollamaBaseUrl);
+    environment.insert(QStringLiteral("MERIVUS_OLLAMA_MODEL"), _ollamaModel);
+    environment.insert(QStringLiteral("MERIVUS_OLLAMA_TIMEOUT_SECONDS"), QString::number(_ollamaTimeoutSeconds));
+    environment.insert(QStringLiteral("MERIVUS_AGENT_ALLOW_MOCK_FALLBACK"), _allowMockFallback ? QStringLiteral("true") : QStringLiteral("false"));
 
     _process.setProgram(spec.program);
     _process.setArguments(spec.arguments);
@@ -670,4 +736,38 @@ void AiServiceSupervisor::_setWorkingDirectory(const QString& path)
 
     _workingDirectory = path;
     emit workingDirectoryChanged();
+}
+
+QString AiServiceSupervisor::_normalizedProvider(const QString& provider) const
+{
+    const QString normalized = provider.trimmed().toLower();
+    if (normalized == QStringLiteral("ollama")) {
+        return QStringLiteral("ollama");
+    }
+    return QStringLiteral("mock");
+}
+
+QString AiServiceSupervisor::_normalizedOllamaBaseUrl(const QString& baseUrl) const
+{
+    QUrl url(baseUrl.trimmed());
+    if (!url.isValid() || url.scheme() != QStringLiteral("http")) {
+        return QStringLiteral("http://127.0.0.1:11434");
+    }
+
+    const QString host = url.host().toLower();
+    if (host != QStringLiteral("127.0.0.1") && host != QStringLiteral("localhost")) {
+        return QStringLiteral("http://127.0.0.1:11434");
+    }
+
+    QUrl normalized;
+    normalized.setScheme(QStringLiteral("http"));
+    normalized.setHost(QStringLiteral("127.0.0.1"));
+    normalized.setPort(url.port(11434));
+    return normalized.toString(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment).trimmed();
+}
+
+QString AiServiceSupervisor::_normalizedOllamaModel(const QString& model) const
+{
+    const QString normalized = model.trimmed();
+    return normalized.isEmpty() ? QStringLiteral("qwen3:8b") : normalized;
 }

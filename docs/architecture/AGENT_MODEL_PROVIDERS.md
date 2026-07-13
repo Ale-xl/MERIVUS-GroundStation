@@ -147,3 +147,9 @@ PyInstaller spec 增加 `httpx/httpcore` 收集，用于本机 Ollama HTTP 调�
 - 新增 52 条中文本地模型评估样例和显式 opt-in 的 `run_model_eval.py` 工具。
 
 当前真实 `qwen3:8b` 仍存在稳定性风险：52 条样例中 command 匹配 28 条，proposal 形态匹配 29 条。该结果说明 normalizer 可以降低格式波动，但模型意图遵循能力仍需要继续迭代。QGC C++ 本地策略边界保持不变。
+
+## QGC Provider 设置补充：feat/agent-provider-settings
+
+`feat/agent-provider-settings` 在 QGC AI 面板中加入 Mock/Ollama Provider 选择、`qwen3:8b` 模型名、Ollama 本机地址、超时和显式 Mock fallback 设置。`AiServiceSupervisor` 只在启动自己托管的 Agent 时注入 `MERIVUS_AGENT_PROVIDER`、`MERIVUS_OLLAMA_BASE_URL`、`MERIVUS_OLLAMA_MODEL`、`MERIVUS_OLLAMA_TIMEOUT_SECONDS` 和 `MERIVUS_AGENT_ALLOW_MOCK_FALLBACK`。
+
+如果当前 8765 端口是外部 Agent，QGC 只显示 `/merivus/info` 的实际 Provider 状态，不杀进程、不改配置，并提示用户手动重启外部 Agent。详见 `docs/architecture/AGENT_PROVIDER_SETTINGS.md`。
