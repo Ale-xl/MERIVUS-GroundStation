@@ -180,3 +180,11 @@ Mock Provider 只能提出 `allowed_capabilities` 中允许的能力。例：用
 - 解析 `reply` 和 `proposal`。
 - Agent 离线、超时、无效 JSON 时只显示错误，不影响飞控主功能。
 - 第一版只显示回复和建议，不执行 proposal。
+
+## 模型 Provider 更新（feat/agent-model-providers）
+
+Python Local Agent 现在支持 `mock` 与本机 `ollama` Provider。默认仍为 `mock`；设置 `MERIVUS_AGENT_PROVIDER=ollama` 后，Agent 通过 `GET /api/tags` 检查本机 Ollama 和 `qwen3:8b`，通过 `POST /api/chat` 生成 `reply/proposal` 结构化输出。
+
+`/merivus/info` 新增 `provider_ready`、`provider_error`、`available_models`，并继续返回 `external_network_enabled=false`、`flight_execution_enabled=false`。Agent 不自动安装 Ollama、不自动 pull 模型、不打包 Ollama 程序或模型权重。
+
+Provider 输出只允许 `reply` 和 `proposal`；`validationStatus`、`policyDecision`、`localRisk`、`requiresConfirmation`、`executable` 仍只由 QGC C++ 本地策略层生成。

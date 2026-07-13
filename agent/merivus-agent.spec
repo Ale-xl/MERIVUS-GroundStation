@@ -15,6 +15,8 @@ for package in (
     "starlette",
     "pydantic",
     "pydantic_core",
+    "httpx",
+    "httpcore",
     "anyio",
     "click",
     "h11",
@@ -30,7 +32,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["pytest", "tests", "httpx"],
+    excludes=["pytest", "tests"],
     noarchive=False,
     optimize=0,
 )

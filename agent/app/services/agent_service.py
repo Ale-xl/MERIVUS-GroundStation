@@ -1,37 +1,32 @@
 from __future__ import annotations
 
-from app.config import DEFAULT_MODEL
-from app.providers import AgentProvider, MockProvider
+from app.config import AgentSettings
+from app.providers.base import ProviderError, ProviderInfo
+from app.providers.router import ProviderRouter, UnknownProviderError, provider_model
 from app.schemas import AgentRequest, AgentResponseData
 
 
-class UnknownProviderError(ValueError):
-    pass
-
-
 class AgentService:
-    def __init__(self, provider_name: str) -> None:
-        self.provider = self._create_provider(provider_name)
+    def __init__(self, settings: AgentSettings) -> None:
+        self.router = ProviderRouter(settings)
+
+    @property
+    def provider(self):
+        return self.router._provider
 
     @property
     def provider_name(self) -> str:
-        return self.provider.name
+        return self.router.provider_name
 
     @property
     def model(self) -> str:
-        return self.provider.model
+        return self.router.model
 
     def generate(self, request: AgentRequest) -> AgentResponseData:
-        return self.provider.generate(request)
+        return self.router.generate(request)
 
-    @staticmethod
-    def _create_provider(provider_name: str) -> AgentProvider:
-        if provider_name == "mock":
-            return MockProvider()
-        raise UnknownProviderError(f"Provider is not available: {provider_name}")
+    def info(self) -> ProviderInfo:
+        return self.router.info()
 
 
-def provider_model(provider_name: str) -> str:
-    if provider_name == "mock":
-        return DEFAULT_MODEL
-    return "unavailable"
+__all__ = ["AgentService", "ProviderError", "UnknownProviderError", "provider_model"]

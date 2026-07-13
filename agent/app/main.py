@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import AGENT_VERSION, DEFAULT_CAPABILITIES, SERVICE_NAME, AgentSettings, configure_logging
 from app.schemas import AgentRequest, AgentResponse, ErrorResponse
-from app.services.agent_service import AgentService, UnknownProviderError, provider_model
+from app.services.agent_service import AgentService, ProviderError, UnknownProviderError, provider_model
 
 logger = logging.getLogger("merivus.agent")
 
@@ -22,10 +22,10 @@ def create_app(settings: AgentSettings | None = None) -> FastAPI:
     app = FastAPI(title="MERIVUS Local Agent", version=AGENT_VERSION)
     app.state.settings = settings
     try:
-        app.state.agent_service = AgentService(settings.provider)
-    except UnknownProviderError:
+        app.state.agent_service = AgentService(settings)
+    except UnknownProviderError as exc:
         app.state.agent_service = None
-        logger.error("Configured provider is unavailable: %s", settings.provider)
+        logger.error("Configured provider is unavailable: %s", exc.message)
 
     @app.middleware("http")
     async def request_logging_middleware(request: Request, call_next: Callable):
@@ -66,13 +66,18 @@ def create_app(settings: AgentSettings | None = None) -> FastAPI:
 
     @app.get("/merivus/info")
     async def info():
+        service = app.state.agent_service
+        provider_info = service.info() if service is not None else None
         return {
             "service": SERVICE_NAME,
             "version": AGENT_VERSION,
             "provider": settings.provider,
-            "model": provider_model(settings.provider),
-            "external_network_enabled": False,
-            "flight_execution_enabled": False,
+            "model": provider_info.model if provider_info is not None else provider_model(settings.provider, settings),
+            "provider_ready": provider_info.provider_ready if provider_info is not None else False,
+            "provider_error": provider_info.provider_error if provider_info is not None else f"Unknown provider: {settings.provider}",
+            "available_models": provider_info.available_models if provider_info is not None else [],
+            "external_network_enabled": provider_info.external_network_enabled if provider_info is not None else False,
+            "flight_execution_enabled": provider_info.flight_execution_enabled if provider_info is not None else False,
             "supported_capabilities": DEFAULT_CAPABILITIES,
             "max_message_length": settings.max_message_length,
         }
@@ -106,6 +111,14 @@ def create_app(settings: AgentSettings | None = None) -> FastAPI:
 
         try:
             response_data = service.generate(agent_request)
+        except ProviderError as exc:
+            logger.warning("Provider error request_id=%s provider=%s code=%s", agent_request.request_id, settings.provider, exc.code)
+            return _error_response(
+                exc.code,
+                exc.message,
+                agent_request.request_id,
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         except Exception:
             logger.exception("Provider error request_id=%s provider=%s", agent_request.request_id, settings.provider)
             return _error_response(

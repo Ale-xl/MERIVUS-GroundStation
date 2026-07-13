@@ -458,3 +458,12 @@
 阶段 6 的 AI 意图策略功能保持 completed。本次仅补齐 Release 构建稳定性：Qt 5.15.2 / MSVC 的生成 Makefile 在大型 QGC 工程中会形成超长 `cl.exe` 命令行，`jom` 可能以 `-1073740791` 崩溃并误导到资源或 qmlcache 阶段。构建脚本现在在 qmake 后为 MSVC 编译 flags 生成响应文件，并使用 `nmake` 执行 Release 构建，避免修改 Qt 安装目录或关闭 Quick Compiler。
 
 下一阶段仍建议进入 `feat/command-confirmation` 或继续细化本地安全策略；模型 Provider 阶段保持 not started，不建议直接接入真实模型。
+
+## 阶段 14 更新：本地模型 Provider
+
+分支：`feat/agent-model-providers`
+状态：进行中
+
+本阶段范围收窄为仅接入本机 Ollama Provider 和 ProviderRouter，保留 MockProvider，不接云 Provider、MCP、数据库或飞行动作执行。默认模型为用户已完成本机部署验证的 `qwen3:8b`。验收重点是结构化输出、错误处理、显式 fallback、安全回归、Agent 打包和 QGC 只读展示。
+
+本阶段完成后不建议直接进入云 Provider；建议先继续做本地模型联调、提示词/结构化输出稳定性、安全策略回归和发布包验证。

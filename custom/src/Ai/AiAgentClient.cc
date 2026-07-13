@@ -259,9 +259,22 @@ void AiAgentClient::_handleInfoReply(QNetworkReply* reply, const QByteArray& bod
     const QString provider = object.value(QStringLiteral("provider")).toString();
     const QString model = object.value(QStringLiteral("model")).toString();
     const QString version = object.value(QStringLiteral("version")).toString();
+    const bool providerReady = object.value(QStringLiteral("provider_ready")).toBool(false);
+    const QString providerError = object.value(QStringLiteral("provider_error")).toString();
+    QStringList availableModels;
+    const QJsonArray models = object.value(QStringLiteral("available_models")).toArray();
+    for (const QJsonValue& value : models) {
+        const QString modelName = value.toString().trimmed();
+        if (!modelName.isEmpty()) {
+            availableModels.append(modelName);
+        }
+    }
 
     if (!provider.isEmpty() && !model.isEmpty()) {
-        _setInfo(provider, model, version);
+        _setInfo(provider, model, version, providerReady, providerError, availableModels);
+        if (!providerReady && !providerError.isEmpty()) {
+            _setLastError(providerError);
+        }
     }
 }
 
@@ -299,7 +312,7 @@ void AiAgentClient::_handleChatReply(QNetworkReply* reply, const QByteArray& bod
     const QString responseProvider = object.value(QStringLiteral("provider")).toString();
     const QString responseModel = object.value(QStringLiteral("model")).toString();
     if (!responseProvider.isEmpty() && !responseModel.isEmpty()) {
-        _setInfo(responseProvider, responseModel, _serviceVersion);
+        _setInfo(responseProvider, responseModel, _serviceVersion, _providerReady, _providerError, _availableModels);
     }
 
     const QJsonValue proposalValue = object.value(QStringLiteral("proposal"));
@@ -426,15 +439,28 @@ void AiAgentClient::_setLastError(const QString& text)
     emit lastErrorChanged();
 }
 
-void AiAgentClient::_setInfo(const QString& provider, const QString& model, const QString& serviceVersion)
+void AiAgentClient::_setInfo(const QString& provider,
+                             const QString& model,
+                             const QString& serviceVersion,
+                             bool providerReady,
+                             const QString& providerError,
+                             const QStringList& availableModels)
 {
-    if (_provider == provider && _model == model && _serviceVersion == serviceVersion) {
+    if (_provider == provider &&
+        _model == model &&
+        _serviceVersion == serviceVersion &&
+        _providerReady == providerReady &&
+        _providerError == providerError &&
+        _availableModels == availableModels) {
         return;
     }
 
     _provider = provider;
     _model = model;
     _serviceVersion = serviceVersion;
+    _providerReady = providerReady;
+    _providerError = providerError;
+    _availableModels = availableModels;
     emit infoChanged();
 }
 

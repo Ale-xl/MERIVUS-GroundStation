@@ -151,3 +151,9 @@ AI 面板收到本地判定后的 proposal 后，只显示：动作、参数摘�
 修复只作用于仓库构建脚本和生成目录中的 Makefile：`tools/dev/build-merivus.ps1` 在 qmake 后生成 MSVC 响应文件，并将编译规则中的公共 flags/include path 改为 `@merivus_cl_*_common.rsp`。Quick Compiler 没有被全局关闭，Qt 安装目录没有修改，AI 面板仍通过独立 `merivus_ai_panel.qrc` 进入普通资源编译，未进入 qmlcache 映射。
 
 安全策略边界保持不变：`ActionProposal`、`AiSchemaValidator`、`AiCommandPolicy` 和 `AiAuditEvent` 未降低约束；高风险起飞类 proposal 仍只显示为未执行建议，`executable=false`，不调用 Vehicle、MAVLink、Swarm 或 PX4 执行入口，也不接入真实模型。
+
+## 本地模型 Provider 输出处理
+
+`feat/agent-model-providers` 后，真实本地模型只能通过 Python Agent 返回 `reply` 和可选 `proposal`。OllamaProvider 会拒绝模型输出中的 `executed`、`executable`、`risk`、`localRisk`、`policyDecision`、`requiresConfirmation`、`mavlink`、`shell`、`script`、`px4_parameters` 等越权字段。
+
+这不是最终安全边界。QGC C++ 的 `AiSchemaValidator` 与 `AiCommandPolicy` 仍会重新校验所有 proposal，并继续保证当前阶段 `executable=false`。未知命令、`param.write`、`mavlink.send_raw` 和危险结构仍按本地策略拒绝。

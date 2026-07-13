@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from app.config import DEFAULT_MODEL
-from app.providers.base import AgentProvider
+from app.providers.base import AgentProvider, ProviderHealth
 from app.schemas import AgentRequest, AgentResponseData, Proposal
 
 
@@ -38,6 +38,9 @@ COMMAND_LABELS = {
 class MockProvider(AgentProvider):
     name = "mock"
     model = DEFAULT_MODEL
+
+    def health(self) -> ProviderHealth:
+        return ProviderHealth(ready=True, available_models=[self.model])
 
     def generate(self, request: AgentRequest) -> AgentResponseData:
         message = request.message.lower()

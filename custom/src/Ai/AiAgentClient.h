@@ -7,6 +7,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QString>
+#include <QStringList>
 #include <QUrl>
 #include <QVariant>
 
@@ -24,6 +26,9 @@ public:
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString provider READ provider NOTIFY infoChanged)
     Q_PROPERTY(QString model READ model NOTIFY infoChanged)
+    Q_PROPERTY(bool providerReady READ providerReady NOTIFY infoChanged)
+    Q_PROPERTY(QString providerError READ providerError NOTIFY infoChanged)
+    Q_PROPERTY(QString availableModelsText READ availableModelsText NOTIFY infoChanged)
     Q_PROPERTY(QString serviceVersion READ serviceVersion NOTIFY infoChanged)
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY endpointChanged)
 
@@ -34,6 +39,9 @@ public:
     QString lastError() const { return _lastError; }
     QString provider() const { return _provider; }
     QString model() const { return _model; }
+    bool providerReady() const { return _providerReady; }
+    QString providerError() const { return _providerError; }
+    QString availableModelsText() const { return _availableModels.join(QStringLiteral(", ")); }
     QString serviceVersion() const { return _serviceVersion; }
     QString endpoint() const { return _endpoint.toString(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment); }
 
@@ -86,7 +94,12 @@ private:
     void _setRequestInProgress(bool inProgress);
     void _setStatusText(const QString& text);
     void _setLastError(const QString& text);
-    void _setInfo(const QString& provider, const QString& model, const QString& serviceVersion);
+    void _setInfo(const QString& provider,
+                  const QString& model,
+                  const QString& serviceVersion,
+                  bool providerReady,
+                  const QString& providerError,
+                  const QStringList& availableModels);
     QJsonObject _safeContext(const QVariantMap& context) const;
     QJsonArray _capabilitiesArray(const QVariantList& allowedCapabilities) const;
 
@@ -102,6 +115,9 @@ private:
     QString _lastError;
     QString _provider = QStringLiteral("mock");
     QString _model = QStringLiteral("mock-v1");
+    bool _providerReady = false;
+    QString _providerError;
+    QStringList _availableModels;
     QString _serviceVersion;
 
     static constexpr int kHealthTimeoutMs = 2000;

@@ -218,3 +218,20 @@ UI 操作：
 Agent 返回的 `risk`、`requires_confirmation`、`executable`、`executed` 等字段不具备权限含义，QGC 会忽略并本地重算。未知字段不会触发任何执行；危险字段、危险嵌套结构、原始 MAVLink 参数数组、shell/script/PX4 批处理内容会被拒绝。
 
 当前策略结果仅用于显示和审计，不连接 Vehicle、Mission、MAVLink、Swarm 或 PX4。高风险命令如 `vehicle.takeoff`、`vehicle.land`、`vehicle.rtl`、`mission.start`、`param.write`、`mavlink.send_raw` 不会执行。
+## Provider info 字段（feat/agent-model-providers）
+
+`GET /merivus/info` 在原字段基础上增加：
+
+```json
+{
+  "provider_ready": true,
+  "provider_error": null,
+  "available_models": ["qwen3:8b"],
+  "external_network_enabled": false,
+  "flight_execution_enabled": false
+}
+```
+
+QGC 仅展示这些字段，不把它们作为飞行动作授权。Provider 失败时，`provider_error` 用于显示明确错误，例如 `Ollama service is not available` 或 `Model qwen3:8b is not installed`。
+
+Agent 响应 schema 保持 `request_id/reply/proposal/provider/model/status`。Provider 不得返回或控制 `validationStatus`、`policyDecision`、`localRisk`、`requiresConfirmation`、`executable`；这些字段由 QGC 本地 C++ 策略层计算。

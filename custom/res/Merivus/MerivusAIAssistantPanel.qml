@@ -717,7 +717,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.settingsOpen ? 258 : 0
+                Layout.preferredHeight: root.settingsOpen ? 316 : 0
                 visible: root.settingsOpen
                 radius: 7
                 color: Qt.rgba(qgcPal.windowShade.r, qgcPal.windowShade.g, qgcPal.windowShade.b, 0.88)
@@ -780,6 +780,31 @@ Item {
                         text: tr("Provider/Model：%1 / %2").arg(aiAgentClient.provider).arg(aiAgentClient.model)
                         color: qgcPal.text
                         font.pixelSize: 12
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        text: tr("Provider Ready：%1").arg(aiAgentClient.providerReady ? tr("是") : tr("否"))
+                        color: aiAgentClient.providerReady ? qgcPal.colorGreen : qgcPal.colorOrange
+                        font.pixelSize: 12
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        visible: aiAgentClient.providerError.length > 0
+                        text: tr("Provider Error：%1").arg(aiAgentClient.providerError)
+                        color: qgcPal.warningText
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        visible: aiAgentClient.availableModelsText.length > 0
+                        text: tr("Models：%1").arg(aiAgentClient.availableModelsText)
+                        color: qgcPal.text
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
                     }
 
                     RowLayout {
