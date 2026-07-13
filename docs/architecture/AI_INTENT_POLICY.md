@@ -157,3 +157,13 @@ AI 面板收到本地判定后的 proposal 后，只显示：动作、参数摘�
 `feat/agent-model-providers` 后，真实本地模型只能通过 Python Agent 返回 `reply` 和可选 `proposal`。OllamaProvider 会拒绝模型输出中的 `executed`、`executable`、`risk`、`localRisk`、`policyDecision`、`requiresConfirmation`、`mavlink`、`shell`、`script`、`px4_parameters` 等越权字段。
 
 这不是最终安全边界。QGC C++ 的 `AiSchemaValidator` 与 `AiCommandPolicy` 仍会重新校验所有 proposal，并继续保证当前阶段 `executable=false`。未知命令、`param.write`、`mavlink.send_raw` 和危险结构仍按本地策略拒绝。
+## 本地模型输出稳定性补充
+
+`feat/ai-model-stability` 增加的 `agent/app/proposal_normalizer.py` 只属于 Agent 侧输出整理层，不改变 QGC C++ 的安全职责。Normalizer 可以把常见别名整理为标准 command/arguments，也可以删除模型越权字段；但它不会授予执行能力，不会计算最终风险，也不会绕过 `AiSchemaValidator` 或 `AiCommandPolicy`。
+
+安全回归要求保持不变：
+
+- `executed`、`executable`、`risk`、`localRisk`、`policyDecision`、`requiresConfirmation` 等模型字段不能成为 QGC 信任来源。
+- `param.write`、`mavlink.send_raw` 和未知 command 仍由本地策略拒绝。
+- 高风险飞行动作仍只能显示为未执行建议。
+- 当前阶段没有 `AiCommandExecutor`，没有确认弹窗，没有真实 Vehicle/MAVLink/PX4/Swarm 执行入口。

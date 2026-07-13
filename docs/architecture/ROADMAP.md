@@ -4,7 +4,7 @@
 
 ## 阶段 0：基线与架构
 
-分支：`docs/project-audit`  
+分支：`docs/project-audit`
 状态：本次执行
 
 任务：
@@ -467,3 +467,36 @@
 本阶段范围收窄为仅接入本机 Ollama Provider 和 ProviderRouter，保留 MockProvider，不接云 Provider、MCP、数据库或飞行动作执行。默认模型为用户已完成本机部署验证的 `qwen3:8b`。验收重点是结构化输出、错误处理、显式 fallback、安全回归、Agent 打包和 QGC 只读展示。
 
 本阶段完成后不建议直接进入云 Provider；建议先继续做本地模型联调、提示词/结构化输出稳定性、安全策略回归和发布包验证。
+## 阶段 14.5：本地模型输出稳定性
+
+分支：`feat/ai-model-stability`
+状态：进行中，本阶段代码和本地验证已完成，真实模型评估仍有剩余风险。
+
+任务：
+
+- 收紧本地 `qwen3:8b` 系统提示词。
+- 增加 Agent 侧 proposal normalizer。
+- 规范化 command alias 和参数 alias。
+- 删除模型越权字段，无法安全整理时降级为 `proposal=null`。
+- 增加 50 条以上中文评估样例。
+- 增加显式 opt-in 的本地 Ollama 评估脚本。
+- 保持 QGC C++ 本地安全策略为最终边界。
+
+验收：
+
+- Agent 单元测试通过。
+- `AiIntentPolicyTest` 通过。
+- Agent Release 打包通过。
+- MERIVUS Release 构建通过。
+- 安全关键字回归确认未新增真实执行链路。
+- 真实 `qwen3:8b` 评估结果记录为剩余风险，不作为进入真实执行链路的依据。
+
+下一步建议：继续迭代本地模型 prompt/eval 和 GUI 人工冒烟；暂不进入云 Provider、MCP 或命令执行器。
+
+## 阶段 14 状态更新：本地 Ollama Provider
+
+`feat/agent-model-providers` 已完成本地 Ollama Provider、ProviderRouter、Mock fallback 控制、QGC Provider 信息展示和 Agent 打包依赖更新。云 Provider、MCP、数据库和真实飞行动作执行均未开始。
+
+## 阶段 7 状态提醒：命令确认/执行器
+
+`feat/command-confirmation` 仍未开始。本阶段没有新增 `AiCommandExecutor`，也没有任何真实飞行动作执行能力。

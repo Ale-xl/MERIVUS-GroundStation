@@ -133,3 +133,17 @@ PyInstaller spec 增加 `httpx/httpcore` 收集，用于本机 Ollama HTTP 调�
 ## 安全结论
 
 本阶段没有真实飞行动作执行。Agent 不访问 MAVLink、PX4、Vehicle 或 SwarmController。所有 proposal 仍由 QGC 本地 C++ 策略层重新计算，当前阶段保持 `executable=false`。
+## 输出稳定性补充：feat/ai-model-stability
+
+`feat/ai-model-stability` 在本地 Ollama Provider 之后增加了一层保守的模型输出规范化，详见 `docs/architecture/AI_MODEL_STABILITY.md`。
+
+本阶段不新增 Provider 类型，不接云 API，不接 MCP，也不增加真实飞行动作执行。主要变化是：
+
+- 收紧 `qwen3:8b` 系统提示词，要求明确意图优先生成标准 `proposal`。
+- 将常见 command alias 规范化到 MERIVUS 标准 command。
+- 将 `drone_id`、`altitude`、`lat/lng` 等参数别名规范化为标准参数名。
+- 删除模型输出中的 `executed`、`executable`、`risk`、`localRisk`、`policyDecision`、`requiresConfirmation`、`mavlink`、`shell`、`script`、`px4_parameters` 等越权字段。
+- 对无法安全规范化的 proposal 降级为 `proposal=null`，并在回复中说明无法形成结构化建议。
+- 新增 52 条中文本地模型评估样例和显式 opt-in 的 `run_model_eval.py` 工具。
+
+当前真实 `qwen3:8b` 仍存在稳定性风险：52 条样例中 command 匹配 28 条，proposal 形态匹配 29 条。该结果说明 normalizer 可以降低格式波动，但模型意图遵循能力仍需要继续迭代。QGC C++ 本地策略边界保持不变。

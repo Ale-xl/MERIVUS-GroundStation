@@ -4,29 +4,11 @@ import json
 from typing import Any
 
 import httpx
-from pydantic import ValidationError
-
 from app.config import AgentSettings
 from app.providers.base import AgentProvider, ProviderError, ProviderHealth, ProviderInfo
 from app.providers.system_prompt import MERIVUS_SYSTEM_PROMPT, OLLAMA_RESPONSE_JSON_SCHEMA
-from app.schemas import AgentRequest, AgentResponseData, Proposal
-
-
-FORBIDDEN_MODEL_FIELDS = {
-    "executed",
-    "executable",
-    "risk",
-    "localRisk",
-    "local_risk",
-    "policyDecision",
-    "policy_decision",
-    "requiresConfirmation",
-    "requires_confirmation",
-    "mavlink",
-    "shell",
-    "script",
-    "px4_parameters",
-}
+from app.schemas import AgentRequest, AgentResponseData
+from app.proposal_normalizer import normalize_model_response
 
 
 class OllamaProvider(AgentProvider):
@@ -153,42 +135,10 @@ class OllamaProvider(AgentProvider):
 
     @staticmethod
     def _validated_response(data: dict[str, Any]) -> AgentResponseData:
-        forbidden = _find_forbidden_field(data)
-        if forbidden:
-            raise ProviderError("model_output_forbidden_field", f"Model output contains forbidden field: {forbidden}")
-
-        allowed_keys = {"reply", "proposal"}
-        extra_keys = set(data) - allowed_keys
-        if extra_keys:
-            raise ProviderError("model_output_invalid_schema", f"Model output contains unsupported field: {sorted(extra_keys)[0]}")
-
-        reply = data.get("reply")
-        if not isinstance(reply, str) or not reply.strip():
-            raise ProviderError("model_output_invalid_schema", "Model output must include a non-empty reply string")
-
-        raw_proposal = data.get("proposal")
-        if raw_proposal is None:
-            return AgentResponseData(reply=reply, proposal=None)
-
-        if not isinstance(raw_proposal, dict):
-            raise ProviderError("model_output_invalid_schema", "proposal must be an object or null")
-
-        proposal_keys = {"command", "arguments", "summary"}
-        extra_proposal_keys = set(raw_proposal) - proposal_keys
-        if extra_proposal_keys:
-            raise ProviderError(
-                "model_output_invalid_schema",
-                f"proposal contains unsupported field: {sorted(extra_proposal_keys)[0]}",
-            )
-
-        if not isinstance(raw_proposal.get("arguments"), dict):
-            raise ProviderError("model_output_invalid_schema", "proposal.arguments must be an object")
-
         try:
-            proposal = Proposal.model_validate(raw_proposal)
-        except ValidationError as exc:
-            raise ProviderError("model_output_invalid_schema", "proposal does not match the required schema") from exc
-        return AgentResponseData(reply=reply, proposal=proposal)
+            return normalize_model_response(data)
+        except ValueError as exc:
+            raise ProviderError("model_output_invalid_schema", str(exc)) from exc
 
     @staticmethod
     def _request_content(request: AgentRequest) -> str:
@@ -200,19 +150,3 @@ class OllamaProvider(AgentProvider):
             },
             ensure_ascii=False,
         )
-
-
-def _find_forbidden_field(value: Any) -> str | None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key in FORBIDDEN_MODEL_FIELDS:
-                return key
-            nested = _find_forbidden_field(child)
-            if nested:
-                return nested
-    elif isinstance(value, list):
-        for child in value:
-            nested = _find_forbidden_field(child)
-            if nested:
-                return nested
-    return None

@@ -147,7 +147,7 @@ def test_ollama_rejects_missing_reply():
     assert exc_info.value.code == "model_output_invalid_schema"
 
 
-def test_ollama_rejects_arguments_with_wrong_type():
+def test_ollama_normalizes_arguments_with_wrong_type_to_null_proposal():
     provider, _calls = _provider(
         chat_content=json.dumps(
             {
@@ -157,19 +157,19 @@ def test_ollama_rejects_arguments_with_wrong_type():
         )
     )
 
-    with pytest.raises(ProviderError) as exc_info:
-        provider.generate(_agent_request())
+    response = provider.generate(_agent_request())
 
-    assert exc_info.value.code == "model_output_invalid_schema"
+    assert response.proposal is None
+    assert "无法形成结构化建议" in response.reply
 
 
-def test_ollama_rejects_executed_field():
+def test_ollama_strips_executed_field():
     provider, _calls = _provider(chat_content='{"reply":"done","proposal":null,"executed":true}')
 
-    with pytest.raises(ProviderError) as exc_info:
-        provider.generate(_agent_request())
+    response = provider.generate(_agent_request())
 
-    assert exc_info.value.code == "model_output_forbidden_field"
+    assert response.reply == "done"
+    assert response.proposal is None
 
 
 def test_ollama_timeout_is_handled():
