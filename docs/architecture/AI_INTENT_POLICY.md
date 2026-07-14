@@ -167,3 +167,13 @@ AI 面板收到本地判定后的 proposal 后，只显示：动作、参数摘�
 - `param.write`、`mavlink.send_raw` 和未知 command 仍由本地策略拒绝。
 - 高风险飞行动作仍只能显示为未执行建议。
 - 当前阶段没有 `AiCommandExecutor`，没有确认弹窗，没有真实 Vehicle/MAVLink/PX4/Swarm 执行入口。
+
+## few-shot / recovery 安全补充
+
+`feat/ai-model-fewshot-eval` 增加的 few-shot 与 normalizer recovery 只提高本地模型输出稳定性，不改变本地策略权限。
+
+- recovery 只能补全明确模板化文本中的 `reply/proposal`，不能执行。
+- recovery 不生成 `param.write` 或 `mavlink.send_raw`，也不默认 `vehicle_id`、起飞高度或地名坐标。
+- recovery 后的 proposal 与模型直接生成的 proposal 完全一样，仍必须经过 `AiSchemaValidator` 和 `AiCommandPolicy`。
+- 高风险动作继续由 QGC 标记为 `PreviewOnly` / `executable=false`。
+- `param.write`、`mavlink.send_raw`、未知 command、危险字段和伪造本地策略字段继续由 C++ 本地策略拒绝或忽略。

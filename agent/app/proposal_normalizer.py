@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -224,6 +225,15 @@ def normalize_model_response(data: dict[str, Any], user_message: str | None = No
 
     raw_proposal = data.get("proposal")
     result = normalize_proposal(raw_proposal, reply.strip())
+    if user_message and raw_proposal is None and result.proposal is None:
+        recovered = recover_proposal_from_user_message(user_message)
+        if recovered is not None:
+            result = NormalizedProposalResult(
+                reply=_append_recovery_note(reply.strip()),
+                proposal=recovered,
+                normalized=True,
+                reason="normalizer_recovery",
+            )
     if user_message and result.proposal is not None:
         intent_type = classify_user_intent(user_message)
         if _proposal_conflicts_with_intent(intent_type, result.proposal.command, user_message):
@@ -241,6 +251,12 @@ def classify_user_intent(message: str) -> str:
 
     if _contains_any(normalized, FORBIDDEN_COMMAND_KEYWORDS):
         return "forbidden_command"
+
+    if _is_explicit_log_tool_request(normalized, "log.explain_error"):
+        return "log_tool"
+
+    if _is_explicit_mission_request(normalized):
+        return "mission_analysis"
 
     if _is_qa_or_log_explanation(normalized) and not _is_explicit_query(normalized):
         return "log_explanation" if _looks_like_log_or_fault(normalized) else "answer_only"
@@ -289,6 +305,132 @@ def normalize_proposal(raw_proposal: Any, reply: str) -> NormalizedProposalResul
         return _no_structured_proposal(reply, "规范化后的 proposal 未通过 Agent schema")
 
     return NormalizedProposalResult(reply=reply, proposal=proposal, normalized=True)
+
+
+def recover_proposal_from_user_message(message: str) -> Proposal | None:
+    normalized = message.strip().lower()
+    if not normalized:
+        return None
+
+    intent_type = classify_user_intent(normalized)
+    if intent_type in {"answer_only", "log_explanation", "forbidden_command"}:
+        return None
+
+    recovered = _recover_log_tool_request(normalized)
+    if recovered is not None:
+        return recovered
+
+    recovered = _recover_mission_request(normalized)
+    if recovered is not None:
+        return recovered
+
+    recovered = _recover_status_query(normalized)
+    if recovered is not None:
+        return recovered
+
+    recovered = _recover_ui_action(normalized)
+    if recovered is not None:
+        return recovered
+
+    return _recover_flight_proposal(normalized)
+
+
+def _recover_status_query(message: str) -> Proposal | None:
+    if not _is_explicit_query(message):
+        return None
+
+    vehicle_id = _extract_vehicle_id(message)
+    command: str | None = None
+    summary: str | None = None
+    arguments: dict[str, Any] = {}
+
+    if "rtk" in message:
+        command = "vehicle.query_rtk"
+        summary = "查询 RTK 状态"
+        if vehicle_id is not None:
+            arguments["vehicle_id"] = vehicle_id
+    elif "电量" in message:
+        command = "vehicle.query_battery"
+        summary = f"查询{_vehicle_label(vehicle_id)}电量"
+    elif "位置" in message or "gps" in message or "定位" in message:
+        command = "vehicle.query_position"
+        summary = f"查询{_vehicle_label(vehicle_id)}位置"
+    elif "状态" in message:
+        command = "vehicle.query_status"
+        summary = f"查询{_vehicle_label(vehicle_id)}状态"
+
+    if command is None:
+        return None
+    if command != "vehicle.query_rtk" and vehicle_id is None and not _is_global_status_query(message, command):
+        return None
+    if vehicle_id is not None and "vehicle_id" in ALLOWED_ARGUMENTS[command]:
+        arguments["vehicle_id"] = vehicle_id
+
+    return Proposal(command=command, arguments=arguments, summary=summary or command)
+
+
+def _recover_log_tool_request(message: str) -> Proposal | None:
+    if not _is_explicit_log_tool_request(message, "log.explain_error"):
+        return None
+    vehicle_id = _extract_vehicle_id(message)
+    arguments = {"vehicle_id": vehicle_id} if vehicle_id is not None else {}
+    return Proposal(command="log.explain_error", arguments=arguments, summary="解释日志或错误信息")
+
+
+def _recover_mission_request(message: str) -> Proposal | None:
+    if not _is_explicit_mission_request(message):
+        return None
+    vehicle_id = _extract_vehicle_id(message)
+    arguments = {"vehicle_id": vehicle_id} if vehicle_id is not None else {}
+    if "草稿" in message:
+        return Proposal(command="mission.create_draft", arguments=arguments, summary="生成任务草稿")
+    return Proposal(command="mission.analyze", arguments=arguments, summary="分析任务或航线")
+
+
+def _recover_ui_action(message: str) -> Proposal | None:
+    if not _is_explicit_ui_action(message):
+        return None
+    if "选择" in message:
+        vehicle_id = _extract_vehicle_id(message)
+        if vehicle_id is None:
+            return None
+        return Proposal(
+            command="ui.select_vehicle",
+            arguments={"vehicle_id": vehicle_id},
+            summary=f"选择{_vehicle_label(vehicle_id)}",
+        )
+    if "打开" in message:
+        page = _extract_page_name(message)
+        if page is None:
+            return None
+        return Proposal(command="ui.open_page", arguments={"page": page}, summary=f"打开{page}页面")
+    return None
+
+
+def _recover_flight_proposal(message: str) -> Proposal | None:
+    if not _is_explicit_flight_proposal(message):
+        return None
+
+    vehicle_id = _extract_vehicle_id(message)
+    if vehicle_id is None:
+        return None
+
+    if "起飞" in message or "takeoff" in message or "take off" in message:
+        altitude_m = _extract_altitude_m(message)
+        if altitude_m is None:
+            return None
+        return Proposal(
+            command="vehicle.takeoff",
+            arguments={"vehicle_id": vehicle_id, "altitude_m": altitude_m},
+            summary=f"建议{_vehicle_label(vehicle_id)}起飞到{_format_number(altitude_m)}米",
+        )
+    if "返航" in message or "rtl" in message or "return to launch" in message:
+        return Proposal(command="vehicle.rtl", arguments={"vehicle_id": vehicle_id}, summary=f"建议{_vehicle_label(vehicle_id)}返航")
+    if "降落" in message or "land" in message:
+        return Proposal(command="vehicle.land", arguments={"vehicle_id": vehicle_id}, summary=f"建议{_vehicle_label(vehicle_id)}降落")
+    if "暂停" in message or "悬停" in message or "pause" in message or "hold" in message:
+        return Proposal(command="vehicle.pause", arguments={"vehicle_id": vehicle_id}, summary=f"建议{_vehicle_label(vehicle_id)}暂停任务")
+    return None
 
 
 def _normalize_command(command: Any) -> str | None:
@@ -435,6 +577,10 @@ def _proposal_conflicts_with_intent(intent_type: str, command: str, user_message
         return command not in {"ui.select_vehicle", "ui.open_page", "map.focus_coordinate"}
     if intent_type == "flight_proposal":
         return command not in FLIGHT_TARGET_COMMANDS
+    if intent_type in {"log_tool", "mission_analysis"}:
+        return command not in {"log.explain_error", "mission.create_draft", "mission.analyze"}
+    if intent_type == "forbidden_command":
+        return not _is_explicit_forbidden_tool_request(user_message, command)
     return False
 
 
@@ -450,6 +596,10 @@ def _looks_like_log_or_fault(message: str) -> bool:
 
 
 def _is_explicit_query(message: str) -> bool:
+    if "rtk" in message and "状态" in message:
+        return True
+    if "是否" in message and "连接" in message:
+        return True
     if not _contains_any(message, EXPLICIT_QUERY_KEYWORDS):
         return False
     return _contains_any(
@@ -472,10 +622,96 @@ def _is_explicit_log_tool_request(message: str, command: str) -> bool:
     return command == "log.explain_error" and _contains_any(message.lower(), ("解释日志", "分析日志", "log"))
 
 
+def _is_explicit_mission_request(message: str) -> bool:
+    return (
+        ("任务草稿" in message and _contains_any(message, ("生成", "创建")))
+        or ("航线" in message and _contains_any(message, ("分析", "判断")))
+        or ("航点" in message and _contains_any(message, ("分析", "判断")))
+    )
+
+
+def _is_global_status_query(message: str, command: str) -> bool:
+    return command == "vehicle.query_status" and _contains_any(message, ("所有", "全部", "当前是否连接", "是否连接"))
+
+
+def _is_explicit_forbidden_tool_request(message: str, command: str) -> bool:
+    normalized = message.lower()
+    if command == "mavlink.send_raw":
+        return "mavlink" in normalized and not _contains_any(normalized, ("绕过", "忽略白名单", "shell"))
+    if command == "param.write":
+        return "参数" in normalized or "param" in normalized
+    return False
+
+
 def _ensure_context_boundary(reply: str) -> str:
     if any(marker in reply for marker in ("没有真实遥测", "缺少真实遥测", "请求上下文", "只能给出常见原因")):
         return reply
     return reply + "\n\n当前请求没有提供真实遥测、日志或传感器数据，因此只能给出常见原因和排查方向。"
+
+
+def _append_recovery_note(reply: str) -> str:
+    if "已按明确指令补全结构化建议" in reply:
+        return reply
+    return reply + "\n\n已按明确指令补全结构化建议；该建议仍需由 QGC 本地策略校验，不代表已经执行。"
+
+
+def _extract_vehicle_id(message: str) -> int | None:
+    english_match = re.search(r"(?:uav|vehicle)[\s#-]*([1-9]\d*)", message)
+    if english_match:
+        return int(english_match.group(1))
+
+    digit_match = re.search(r"(?<!\d)([1-9]\d*)\s*(?:号机|号无人机|号|#|uav|vehicle)", message)
+    if digit_match:
+        return int(digit_match.group(1))
+
+    chinese_numbers = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
+    for token, value in chinese_numbers.items():
+        if any(pattern in message for pattern in (f"{token}号机", f"{token}号无人机", f"{token}号")):
+            return value
+    return None
+
+
+def _extract_altitude_m(message: str) -> float | None:
+    match = re.search(r"(?:起飞到|高度到|到|至|爬升到)\s*([1-9]\d*(?:\.\d+)?)\s*(?:米|m)", message)
+    if not match:
+        match = re.search(r"([1-9]\d*(?:\.\d+)?)\s*(?:米|m)", message)
+    if not match:
+        return None
+    value = float(match.group(1))
+    return value if _valid_altitude(value, allow_zero=False) else None
+
+
+def _extract_page_name(message: str) -> str | None:
+    page_aliases = {
+        "地图": "map",
+        "参数": "parameters",
+        "ai": "ai",
+        "日志": "logs",
+    }
+    for token, page in page_aliases.items():
+        if token in message:
+            return page
+    return None
+
+
+def _vehicle_label(vehicle_id: int | None) -> str:
+    return f"{vehicle_id}号无人机" if vehicle_id is not None else "无人机"
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 def _contains_any(message: str, keywords: tuple[str, ...]) -> bool:

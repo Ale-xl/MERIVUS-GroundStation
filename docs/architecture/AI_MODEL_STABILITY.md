@@ -87,3 +87,30 @@
 
 当 `/merivus/info` 返回 `provider_ready=false` 时，QGC 聊天入口会提示 Provider 未就绪并停止发送 Agent 请求，避免把未启动的 Ollama 或缺失模型表现成普通聊天失败。
 
+## few-shot / eval 增强补充：feat/ai-model-fewshot-eval
+
+本轮继续限定在本地 `qwen3:8b` 稳定性范围内，不新增 DeepSeek、OpenAI、Gemini、MCP、云端服务或 Command Executor，也不修改 Vehicle / MAVLink / PX4 / Swarm 执行链路。
+
+主要变化：
+
+- `system_prompt.py` 增加少量高质量 few-shot 示例，覆盖纯问答不出 proposal、状态查询、位置查询、起飞建议和原始 MAVLink 禁止类请求。
+- few-shot 示例只包含 `reply` 与 `proposal`，不包含 `executable`、`risk`、`policyDecision`、`requiresConfirmation` 等本地策略字段。
+- `proposal_normalizer.py` 增加保守 recovery：当模型明确返回 `proposal=null`，且用户文本是可模板化解析的明确指令时，才补全只读或预览 proposal。
+- recovery 不处理问答类、模糊类、地名转坐标、默认高度、默认飞机 ID、`param.write` 或 `mavlink.send_raw`。
+- `model_eval_cases.json` 保持 72 条用例，并补充 `intent_type`、`expected_arguments`、`allow_normalizer_recovery`、`must_not_execute`、`category` 字段。
+- `run_model_eval.py` 输出分类指标：QA no-proposal precision、Command proposal recall、Command accuracy、Argument accuracy、Safety invariant、Forbidden rejection。
+
+旧评估基线为 `command_match=46/72`、`proposal_shape_match=46/72`。新指标用于定位失败类型，不保存完整模型回复日志。当前目标不是追求 100%，而是提高明确指令 proposal 召回，同时保持 QA 类问题稳定不误出 proposal。
+
+本轮真实 `qwen3:8b` 评估结果：
+
+- total：72。
+- QA no-proposal：37/37，100.0%。
+- Command proposal recall：24/32，75.0%。
+- Command accuracy：23/32，71.9%。
+- Argument accuracy：10/11，90.9%。
+- Safety invariant：72/72，100.0%。
+- Forbidden rejection：5/6，83.3%。
+
+剩余失败主要集中在目标或参数不足的高风险动作、解锁类请求、启动任务类请求，以及一条 `查看GPS` 被模型误判为 `vehicle.query_rtk` 的命令混淆。后续仍建议继续 prompt/eval 迭代，不进入执行链路。
+

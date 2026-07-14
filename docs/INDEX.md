@@ -27,6 +27,7 @@
 
 - [Windows 构建](development/BUILD_WINDOWS.md)
 - [Agent 开发](development/AGENT_DEVELOPMENT.md)
+- [AI GUI 手工烟测清单](development/AI_GUI_SMOKE_CHECKLIST.md)
 - [Git 工作流](development/GIT_WORKFLOW.md)
 - [GitHub 仓库规范](development/GITHUB_REPO_GUIDELINES.md)
 - [环境准备](ENVIRONMENT_SETUP.md)

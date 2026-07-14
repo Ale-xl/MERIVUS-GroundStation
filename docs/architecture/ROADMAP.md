@@ -542,3 +542,32 @@
 - 明确查询和飞行动作建议仍可生成 proposal。
 - 所有 proposal 仍保持 `executable=false`。
 - 不新增真实飞行动作执行链路。
+
+## 阶段 14.8：本地模型 few-shot / eval 稳定性增强
+
+分支：`feat/ai-model-fewshot-eval`
+状态：completed。
+
+任务：
+
+- 增加 `qwen3:8b` few-shot 示例，提高明确指令的 proposal 召回。
+- 增加 normalizer recovery，只对明确模板化指令补全 proposal。
+- 重构模型评估指标，区分 QA no-proposal、command recall、command accuracy、argument accuracy、safety invariant 和 forbidden rejection。
+- 为 eval fixture 增加 `intent_type`、`expected_arguments`、`allow_normalizer_recovery`、`must_not_execute`、`category` 字段。
+- 新增 GUI 手工 smoke checklist。
+
+安全边界：
+
+- 不新增 DeepSeek、OpenAI、Gemini、MCP 或云端服务。
+- 不新增 Command Executor。
+- 不新增 MAVLink / Vehicle / Swarm / PX4 执行调用。
+- 不使用真实无人机。
+- 高风险动作仍由 QGC C++ 本地策略保持 `executable=false`。
+
+验收：
+
+- Agent 单元测试通过。
+- `run_model_eval.py --provider ollama --model qwen3:8b` 输出新分类指标。
+- `AiIntentPolicyTest` 继续通过。
+- Agent 打包和 MERIVUS Release 构建继续通过。
+- 安全关键词检查确认未新增真实执行链路。
