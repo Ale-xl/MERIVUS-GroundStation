@@ -66,6 +66,7 @@ Item {
     visible: width > 900 && height > 560
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
+    FtcStatusPalette { id: ftcStatusPalette }
     Timer { interval: 1000; running: root.visible; repeat: true; onTriggered: root.now = new Date() }
 
     function tr(text) { return qsTr(text) }
@@ -250,6 +251,27 @@ function escFact(vehicle, prefix, motorIndex) {
                tr("电流：%1").arg(escNumber(focusVehicle, "current", motorIndex, 1, "A")) + "\n" +
                tr("电压：%1").arg(escNumber(focusVehicle, "voltage", motorIndex, 1, "V")) + "\n" +
                tr("电调温度：%1").arg(escNumber(focusVehicle, "temperature", motorIndex, 1, "°C"))
+    }
+
+    function ftcMotorData(vehicle, motorIndex) {
+        if (!vehicle || !vehicle.ftcStatus || !vehicle.ftcStatus.motorAvailable || vehicle.ftcStatus.motorStale) return null
+        if (motorIndex < 0 || motorIndex >= vehicle.ftcStatus.motorCount) return null
+        return vehicle.ftcStatus.motors.get(motorIndex)
+    }
+
+    function ftcPercentText(value) {
+        return value !== undefined && value >= 0 ? Number(value).toFixed(0) + "%" : "--"
+    }
+
+    function motorTipText(motorIndex) {
+        var text = escTipText(motorIndex)
+        var motor = ftcMotorData(focusVehicle, motorIndex)
+        if (!motor) return text + "\n" + tr("FTC 健康与效能：N/A")
+        return text + "\n" +
+               tr("FTC 健康：%1（不是剩余寿命）").arg(ftcPercentText(motor.health)) + "\n" +
+               tr("FTC 效能：%1").arg(ftcPercentText(motor.effectiveness)) + "\n" +
+               tr("故障概率：%1，置信度：%2").arg(ftcPercentText(motor.faultProbability)).arg(ftcPercentText(motor.confidence)) + "\n" +
+               tr("分类：%1").arg(motor.faultTypeText)
     }
 
     function linkStateText(vehicle) {
@@ -775,11 +797,13 @@ function escFact(vehicle, prefix, motorIndex) {
                         { label: "M4", index: 3, direction: "CCW" }
                     ]
                     Rectangle {
+                        property var ftcMotor: root.ftcMotorData(root.focusVehicle, modelData.index)
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 56
+                        Layout.preferredHeight: 72
                         radius: 5
                         color: escMouse.containsMouse ? root.raisedColor : qgcPal.windowShade
-                        border.color: root.escMotorOnline(root.focusVehicle, modelData.index) ? root.nominal : (escMouse.containsMouse ? root.accent : root.mutedLine)
+                        border.color: ftcMotor ? ftcStatusPalette.colorFor(ftcMotor.severity)
+                                               : (root.escMotorOnline(root.focusVehicle, modelData.index) ? root.nominal : (escMouse.containsMouse ? root.accent : root.mutedLine))
                         Column {
                             anchors.fill: parent
                             anchors.margins: 5
@@ -812,6 +836,13 @@ function escFact(vehicle, prefix, motorIndex) {
                                 font.bold: true
                                 font.pointSize: root.fontPointSize(10)
                             }
+                            QGCLabel {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: ftcMotor ? tr("H %1 · E %2").arg(root.ftcPercentText(ftcMotor.health)).arg(root.ftcPercentText(ftcMotor.effectiveness))
+                                               : tr("H -- · E --")
+                                color: ftcMotor ? ftcStatusPalette.colorFor(ftcMotor.severity) : root.muted
+                                font.pointSize: root.fontPointSize(9)
+                            }
                         }
                         MouseArea {
                             id: escMouse
@@ -819,11 +850,17 @@ function escFact(vehicle, prefix, motorIndex) {
                             hoverEnabled: true
                             acceptedButtons: Qt.NoButton
                             onContainsMouseChanged: containsMouse
-                                ? root.showFloatingToolTip(this, root.escTipText(modelData.index), "right")
+                                ? root.showFloatingToolTip(this, root.motorTipText(modelData.index), "right")
                                 : root.hideFloatingToolTip()
                         }
                     }
                 }
+            }
+
+            FtcStatusPanel {
+                Layout.fillWidth: true
+                vehicle: root.focusVehicle
+                statusPalette: ftcStatusPalette
             }
 
             RowLayout {
