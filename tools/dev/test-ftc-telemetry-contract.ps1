@@ -7,6 +7,11 @@ $backendHeader = Join-Path $projectRoot "src\Vehicle\VehicleFtcStatusFactGroup.h
 $backendSource = Join-Path $projectRoot "src\Vehicle\VehicleFtcStatusFactGroup.cc"
 $panel = Join-Path $projectRoot "custom\res\Merivus\FtcStatusPanel.qml"
 $overlay = Join-Path $projectRoot "custom\res\Merivus\CommandCenterOverlay.qml"
+$qmakeProject = Join-Path $projectRoot "qgroundcontrol.pro"
+$vehicleCMake = Join-Path $projectRoot "src\Vehicle\CMakeLists.txt"
+$resource = Join-Path $projectRoot "custom\qgroundcontrol.qrc"
+$flightDisplayModule = Join-Path $projectRoot "custom\res\Merivus\qmldir"
+$controlsModule = Join-Path $projectRoot "src\QmlControls\QGroundControl\Controls\qmldir"
 
 function Assert-Contains([string]$Path, [string]$Pattern, [string]$Message) {
     if (-not (Select-String -LiteralPath $Path -Pattern $Pattern -Quiet)) {
@@ -68,6 +73,17 @@ foreach ($stateText in @(
 
 Assert-Contains $panel "vehicle\.ftcStatus" "FTC 面板没有使用 Vehicle 类型化后端"
 Assert-Contains $overlay "ftcStatus\.motors\.get" "电机卡片没有接入 FTC 电机模型"
+Assert-Contains $qmakeProject "src/Vehicle/VehicleFtcStatusFactGroup\.cc" "qmake 没有编译 FTC 后端源文件"
+Assert-Contains $qmakeProject "src/Vehicle/VehicleFtcStatusFactGroup\.h" "qmake 没有把 FTC 后端头文件交给 MOC"
+Assert-Contains $vehicleCMake "VehicleFtcStatusFactGroup\.cc" "CMake 没有编译 FTC 后端源文件"
+Assert-Contains $vehicleCMake "VehicleFtcStatusFactGroup\.h" "CMake 没有把 FTC 后端头文件交给 AUTOMOC"
+Assert-Contains $resource "QGroundControl/FlightDisplay/FtcStatusPanel\.qml" "FTC 面板没有进入 custom qrc"
+Assert-Contains $resource "QGroundControl/FlightDisplay/FtcStatusPalette\.qml" "FTC 调色板没有进入 custom qrc"
+Assert-Contains $flightDisplayModule "FtcStatusPanel\s+1\.0\s+FtcStatusPanel\.qml" "FTC 面板没有导出到 FlightDisplay 模块"
+Assert-Contains $flightDisplayModule "FtcStatusPalette\s+1\.0\s+FtcStatusPalette\.qml" "FTC 调色板没有导出到 FlightDisplay 模块"
+Assert-Contains $controlsModule "QGCButton\s+1\.0\s+QGCButton\.qml" "Controls 模块没有导出 QGCButton"
+Assert-Contains $controlsModule "QGCLabel\s+1\.0\s+QGCLabel\.qml" "Controls 模块没有导出 QGCLabel"
+Assert-Contains $panel "import QGroundControl\.Controls\s+1\.0" "FTC 面板缺少 QGroundControl.Controls import"
 
 if (Select-String -LiteralPath $panel, $overlay -Pattern "mavlink_msg_|MAVLINK_MSG_ID_" -Quiet) {
     throw "QML 不得解析原始 MAVLink"

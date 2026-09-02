@@ -260,7 +260,7 @@ function escFact(vehicle, prefix, motorIndex) {
     }
 
     function ftcPercentText(value) {
-        return value !== undefined && value >= 0 ? Number(value).toFixed(0) + "%" : "--"
+        return value !== undefined && value >= 0 ? Number(value).toFixed(0) + "%" : tr("N/A")
     }
 
     function motorTipText(motorIndex) {
@@ -839,7 +839,7 @@ function escFact(vehicle, prefix, motorIndex) {
                             QGCLabel {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: ftcMotor ? tr("H %1 · E %2").arg(root.ftcPercentText(ftcMotor.health)).arg(root.ftcPercentText(ftcMotor.effectiveness))
-                                               : tr("H -- · E --")
+                                               : tr("H N/A · E N/A")
                                 color: ftcMotor ? ftcStatusPalette.colorFor(ftcMotor.severity) : root.muted
                                 font.pointSize: root.fontPointSize(9)
                             }

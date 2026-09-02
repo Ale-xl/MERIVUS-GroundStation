@@ -50,6 +50,26 @@ try {
             "",
             [Text.RegularExpressions.RegexOptions]::Multiline)
 
+        # mavgen writes the current day into version.h even though it is not part of
+        # the wire contract. Preserve the tracked value so repeated generation is
+        # deterministic and -Check only reports protocol-relevant differences.
+        if ($generatedFile.Name -eq "version.h") {
+            $trackedVersion = Join-Path $headerRoot "$($generatedFile.Directory.Name)\version.h"
+
+            if (Test-Path $trackedVersion) {
+                $trackedBuildDate = [regex]::Match(
+                    [IO.File]::ReadAllText($trackedVersion),
+                    '#define MAVLINK_BUILD_DATE "[^"]+"').Value
+
+                if ($trackedBuildDate) {
+                    $normalizedText = [regex]::Replace(
+                        $normalizedText,
+                        '#define MAVLINK_BUILD_DATE "[^"]+"',
+                        $trackedBuildDate)
+                }
+            }
+        }
+
         if ($normalizedText -cne $generatedText) {
             [IO.File]::WriteAllText($generatedFile.FullName, $normalizedText, [Text.UTF8Encoding]::new($false))
         }

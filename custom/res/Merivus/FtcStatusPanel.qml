@@ -1,6 +1,7 @@
 import QtQuick          2.12
 import QtQuick.Controls 2.4
 import QtQuick.Layouts  1.11
+import QGroundControl             1.0
 import QGroundControl.Controls    1.0
 import QGroundControl.Palette     1.0
 import QGroundControl.ScreenTools 1.0
@@ -15,17 +16,32 @@ Rectangle {
     readonly property bool systemFresh: fresh && ((ftc.motorAvailable && !ftc.motorStale) || (ftc.controlAvailable && !ftc.controlStale))
     readonly property bool controlFresh: fresh && ftc.controlAvailable && !ftc.controlStale
     readonly property bool extremeFresh: fresh && ftc.extremeAvailable && !ftc.extremeStale
+    readonly property bool locCritical: extremeFresh && ftc.locSeverity === "critical"
+    readonly property bool recoveryVisible: (controlFresh || extremeFresh) && ftc.recoveryState > 1
+    readonly property bool degradedVisible: !locCritical && ((systemFresh && ftc.systemSeverity !== "normal")
+                                                           || (controlFresh && ftc.authoritySeverity !== "normal")
+                                                           || (extremeFresh && ftc.locSeverity === "warning"))
+    readonly property bool nominal: systemFresh && ftc.systemSeverity === "normal"
+                                    && (!controlFresh || ftc.authoritySeverity === "normal")
+                                    && (!extremeFresh || ftc.locSeverity === "normal")
+                                    && !recoveryVisible
+    readonly property string panelSeverity: locCritical
+                                             ? "critical"
+                                             : (recoveryVisible && ftc.recoverySeverity === "critical"
+                                                ? "critical"
+                                                : (degradedVisible || recoveryVisible ? "warning"
+                                                                                      : (nominal ? "normal" : "unavailable")))
 
     radius: 5
     color: qgcPal.windowShade
-    border.color: statusPalette.colorFor(systemFresh ? ftc.systemSeverity : "unavailable")
+    border.color: statusPalette.colorFor(panelSeverity)
     implicitHeight: compactColumn.implicitHeight + 12
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
     FtcStatusPalette { id: localPalette }
 
     function percentText(value) {
-        return value >= 0 ? Number(value).toFixed(0) + "%" : "--"
+        return value >= 0 ? Number(value).toFixed(0) + "%" : qsTr("N/A")
     }
 
     function statusText() {
@@ -38,6 +54,19 @@ Rectangle {
         return ftc.systemStateText
     }
 
+    function warningText() {
+        if (!ftc) return ""
+
+        var warnings = []
+        if (systemFresh && ftc.systemSeverity !== "normal") warnings.push(ftc.systemStateText)
+        if (controlFresh && ftc.authoritySeverity !== "normal") warnings.push(ftc.authorityStateText)
+        if (extremeFresh && ftc.locSeverity === "warning") warnings.push(ftc.locStateText)
+
+        var text = qsTr("注意：%1").arg(warnings.join(qsTr(" · ")))
+        if (controlFresh) text += qsTr(" · 最小姿态裕度 %1").arg(percentText(ftc.minimumAttitudeAuthority))
+        return text
+    }
+
     ColumnLayout {
         id: compactColumn
         anchors.fill: parent
@@ -48,8 +77,8 @@ Rectangle {
             Layout.fillWidth: true
             QGCLabel {
                 Layout.fillWidth: true
-                text: qsTr("FTC 状态")
-                color: qgcPal.text
+                text: root.nominal ? qsTr("FTC · 正常") : qsTr("FTC · %1").arg(root.statusText())
+                color: root.statusPalette.colorFor(root.panelSeverity)
                 font.bold: true
                 font.pointSize: ScreenTools.smallFontPointSize
             }
@@ -69,33 +98,6 @@ Rectangle {
                     font.pointSize: ScreenTools.smallFontPointSize
                 }
             }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-            QGCLabel {
-                Layout.fillWidth: true
-                text: root.statusText()
-                color: statusPalette.colorFor(root.systemFresh ? root.ftc.systemSeverity : "unavailable")
-                font.bold: true
-            }
-            QGCLabel {
-                text: qsTr("最小姿态裕度 %1").arg(root.controlFresh ? root.percentText(root.ftc.minimumAttitudeAuthority) : "--")
-                color: qgcPal.text
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-            QGCLabel {
-                Layout.fillWidth: true
-                text: root.extremeFresh ? qsTr("失控：%1 · 恢复：%2").arg(root.ftc.locStateText).arg(root.ftc.recoveryStateText)
-                                 : qsTr("失控与恢复状态：N/A")
-                color: root.extremeFresh ? statusPalette.colorFor(root.ftc.locSeverity) : qgcPal.colorGrey
-                elide: Text.ElideRight
-            }
             QGCButton {
                 text: qsTr("详情")
                 enabled: !!root.ftc && root.ftc.available && root.ftc.protocolCompatible
@@ -103,13 +105,78 @@ Rectangle {
             }
         }
 
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root.degradedVisible
+            implicitHeight: degradedLabel.implicitHeight + 10
+            radius: 4
+            color: Qt.rgba(root.statusPalette.colorFor("warning").r,
+                           root.statusPalette.colorFor("warning").g,
+                           root.statusPalette.colorFor("warning").b, 0.14)
+            border.color: root.statusPalette.colorFor("warning")
+            QGCLabel {
+                id: degradedLabel
+                anchors.fill: parent
+                anchors.margins: 5
+                text: root.warningText()
+                color: qgcPal.text
+                wrapMode: Text.WordWrap
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root.locCritical
+            implicitHeight: locLabel.implicitHeight + 12
+            radius: 4
+            color: Qt.rgba(root.statusPalette.colorFor("critical").r,
+                           root.statusPalette.colorFor("critical").g,
+                           root.statusPalette.colorFor("critical").b, 0.2)
+            border.width: 2
+            border.color: root.statusPalette.colorFor("critical")
+            QGCLabel {
+                id: locLabel
+                anchors.fill: parent
+                anchors.margins: 6
+                text: root.extremeFresh
+                      ? qsTr("LOC 警告 · %1 · 风险 %2").arg(root.ftc.locStateText).arg(root.percentText(root.ftc.lossOfControlScore))
+                      : ""
+                color: root.statusPalette.colorFor("critical")
+                wrapMode: Text.WordWrap
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root.recoveryVisible
+            implicitHeight: recoveryLabel.implicitHeight + 10
+            radius: 4
+            color: Qt.rgba(root.statusPalette.colorFor(root.ftc ? root.ftc.recoverySeverity : "unavailable").r,
+                           root.statusPalette.colorFor(root.ftc ? root.ftc.recoverySeverity : "unavailable").g,
+                           root.statusPalette.colorFor(root.ftc ? root.ftc.recoverySeverity : "unavailable").b, 0.14)
+            border.color: root.statusPalette.colorFor(root.ftc ? root.ftc.recoverySeverity : "unavailable")
+            QGCLabel {
+                id: recoveryLabel
+                anchors.fill: parent
+                anchors.margins: 5
+                text: root.ftc
+                      ? qsTr("Recovery · %1 · 进度 %2").arg(root.ftc.recoveryStateText).arg(root.percentText(root.ftc.recoveryProgress))
+                      : ""
+                color: qgcPal.text
+                wrapMode: Text.WordWrap
+                font.bold: true
+            }
+        }
+
         QGCLabel {
             Layout.fillWidth: true
-            visible: root.controlFresh && root.ftc.controlMode !== 0
+            visible: root.controlFresh && root.ftc.controlMode >= 3
             text: root.ftc.controlMode === 4
-                  ? qsTr("ACTIVE 表示执行器命令路径已明确接入。")
-                  : qsTr("当前仅观测、影子计算或候选恢复，不向执行器下发 FTC 命令。")
-            color: qgcPal.colorGrey
+                  ? qsTr("ACTIVE：执行器命令路径已明确接入。")
+                  : qsTr("当前为恢复候选，不向执行器下发 FTC 命令。")
+            color: root.statusPalette.colorFor(root.ftc.controlMode === 4 ? "critical" : "warning")
             wrapMode: Text.WordWrap
             font.pointSize: ScreenTools.smallFontPointSize
         }
@@ -129,7 +196,7 @@ Rectangle {
         background: Rectangle {
             color: qgcPal.window
             radius: 8
-            border.color: root.statusPalette.colorFor(root.systemFresh ? root.ftc.systemSeverity : "unavailable")
+            border.color: root.statusPalette.colorFor(root.panelSeverity)
         }
 
         contentItem: ColumnLayout {
