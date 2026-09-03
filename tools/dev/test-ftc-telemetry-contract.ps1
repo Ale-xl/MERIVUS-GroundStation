@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $firmwareRoot = Join-Path (Split-Path $projectRoot -Parent) "FirmwarePX4"

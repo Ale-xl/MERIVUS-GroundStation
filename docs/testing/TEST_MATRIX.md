@@ -7,7 +7,7 @@
 | 协议 | 生成物可复现 | `generate-merivus-mavlink.ps1 -Check` | 文件列表与内容一致 | 已通过 |
 | 静态闭环 | 字段—属性—QML | `test-ftc-telemetry-contract.ps1` | 必需属性和消费入口齐全，QML 无原始解码 | 已通过 |
 | 固件静态 | 9 个 uORB 源与安全模式 | `Tools/merivus/verify_ftc_telemetry.py` | 主题齐全，不报告 ACTIVE | 已通过 |
-| C++ | GroundStation 编译 | Qt 5.15.2 / MSVC 2019 Release | `VehicleFtcStatusFactGroup` 和生成头无编译错误 | 待执行 |
+| C++ | GroundStation 编译 | Qt 5.15.2 / MSVC 2019 Release | `VehicleFtcStatusFactGroup` 和生成头无编译错误 | 已通过（2026-09-02，全量 Release） |
 | QML | lint | 对新增和改动 QML 运行 `qmllint` | 无语法、未解析属性和导入错误 | 待执行 |
 | 固件 | SITL 编译 | `make px4_sitl_default` | `merivus` 方言生成并链接 | 待执行 |
 | 固件 | FMUv6C 编译 | `make px4_fmu-v6c_default` | 固件体积与编译通过 | 待执行 |

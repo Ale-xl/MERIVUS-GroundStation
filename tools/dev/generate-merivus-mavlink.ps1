@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$MavlinkSource = "",
     [string]$Python = "python",
     [switch]$Check
