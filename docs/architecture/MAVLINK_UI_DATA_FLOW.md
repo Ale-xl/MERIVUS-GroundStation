@@ -14,7 +14,7 @@
 ## 可用性
 
 - `available=false`：没有兼容的 FTC 协议数据。非 FTC 飞控走这条路径，其他 GroundStation 功能不受影响。
-- `protocolCompatible=false`：已经收到 FTC 消息，但 `protocol_version` 不是 1。界面明确显示版本不兼容。
+- `protocolCompatible=false`：已经收到 FTC 消息，但 `protocol_version` 不是 2。界面明确显示版本不兼容。
 - `stale=true`：曾收到兼容数据，但所有已出现消息族都超过 3 秒未更新。
 - `motorStale`、`controlStale`、`extremeStale`、`diagnosticsStale`：分别控制局部数据显示，不能用一个新消息掩盖另一族过期。
 

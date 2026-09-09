@@ -1,92 +1,39 @@
-# FTC 遥测契约
+# FTC 遥测 v2 契约
 
-## 版本与来源
+更新：2026-09-09。`protocol_version=2`；传输为 MAVLink 2。两仓核心 XML 逐字节一致，SHA-256 为 `27d637cb3da357295f9b3f59467be07a13e2b63f6da040b3f78a3af93d9d7a12`。Firmware 使用 development 包装，GroundStation 使用 all 包装；上游 common 不改动。生成器锁定 MAVLink 子模块 `18955a04c7c7467e00ea42b704addb4a9c12b53a`，固定 PYTHONHASHSEED=0。
 
-- 契约版本：1
-- MAVLink 传输：MAVLink 2
-- 核心定义：`schemas/mavlink/merivus_ftc.xml`
-- GroundStation 包装方言：`schemas/mavlink/merivus.xml`，继承 `all.xml`
-- FirmwarePX4 包装方言：继承 `development.xml`
-- 核心 XML SHA-256：`0ae936460c2489f33cebaaba018b2532dd258486d50d1fd835dbc91fc6fc064d`
-- 生成器来源：FirmwarePX4 锁定的 MAVLink 子模块提交 `18955a04c7c7467e00ea42b704addb4a9c12b53a`
+## 兼容性和带宽
 
-`common.xml` 未修改。GroundStation 和固件使用不同包装方言，但共享逐字节相同的 FTC 核心定义。
+原有消息 ID、基础字段、MIN_LEN 和 CRC 保持，新增字段全部放在 MAVLink 2 extensions。线路布局可由旧解析器截断读取，但 v2 改变 ACTIVE/validity 语义，因此应用必须验证协议版本；旧版 v1 与新版 v2 应显示不兼容，不能静默推断安全状态。
 
-## 消息
+| ID | 消息后缀 | MIN_LEN / LEN | CRC | 频率 | 最大未签名流量 |
+| --- | --- | --- | --- | --- | --- |
+| 60000 | MOTOR_STATUS | 78 / 153 | 29 | 5 Hz | 825 B/s |
+| 60001 | CONTROL_STATUS | 24 / 78 | 153 | 5 Hz | 450 B/s |
+| 60002 | EXTREME_STATUS | 38 / 38 | 136 | 10 Hz | 500 B/s |
+| 60003 | DIAGNOSTICS | 65 / 117 | 5 | 1 Hz | 129 B/s |
 
-| ID | 名称 | 负载 | CRC | 默认频率 | 无签名流量 |
-| ---: | --- | ---: | ---: | ---: | ---: |
-| 60000 | `MERIVUS_FTC_MOTOR_STATUS` | 78 B | 29 | 5 Hz | 450 B/s |
-| 60001 | `MERIVUS_FTC_CONTROL_STATUS` | 24 B | 153 | 5 Hz | 180 B/s |
-| 60002 | `MERIVUS_FTC_EXTREME_STATUS` | 38 B | 136 | 10 Hz | 500 B/s |
-| 60003 | `MERIVUS_FTC_DIAGNOSTICS` | 65 B | 5 | 1 Hz | 77 B/s |
+以每帧 12 B 开销计算合计 1,904 B/s，13 B 签名块后 2,177 B/s；零尾裁剪可降低实际长度。57,600 baud、MAV_0_RATE=0 的标称预算约 2,880 B/s，FTC 最大未签名占约 66%，须与其他消息共享并在后续测量调度降频、延迟和丢包。流频率可由 PX4 标准调度器调整。
 
-MAVLink 2 未签名帧按每帧 12 B 开销计算，总计约 1,207 B/s。启用 13 B 签名块后约 1,480 B/s。FMUv6C 的 TELEM1 基线为 57,600 baud；8N1 物理上限约 5,760 B/s，`MAV_0_RATE=0` 的标称发送预算约 2,880 B/s。FTC 流约占未签名预算的 42%，仍要与心跳、姿态、位置等消息共享。PX4 调度器可以降频，四条流没有设置常量速率。
+## 字段和语义
 
-## 百分比编码
+MOTOR_STATUS 增加 last_valid_timestamp、estimate_age、12 路 uncertainty/diagnosis_state、estimator_state、baseline_learned、current_observable。confidence 是协方差质量分数，历史效能允许用于诊断；health 仅在模型有效时提供。GroundStation 主 H/E 仍按模型有效性隐藏历史数值。
 
-`uint8_t` 的 `0..200` 表示 `0..100%`，每个计数为 `0.5%`。`255` 表示不可用。发送端先限制到 `0..1`，再编码；GroundStation 解码到 `0..100`。`201..254` 在版本 1 中保留，不应生成。
+CONTROL_STATUS 增加三轴正/负方向权限、thrust_up/down、reachable_residual、allocation/recovery fallback、arbitration/reentry weight、实际 allocation/recovery active。ACTIVE_COMMAND_PATH 和 ACTIVE 模式只来自 Supervisor 聚合的实际分配/仲裁反馈，不从使能参数或候选有效性推断。
 
-## 消息职责
+DIAGNOSTICS 增加条件数、真实预测残差、rigid_body_activity、更新/复位计数、mass/inertia/CG 及其可用状态和估计门标志。其余撞击/LOC 消息保持基本结构；恢复枚举追加 VERTICAL_SPEED_RECOVERY=11，已有数值不重排。
 
-### 电机状态 60000
+`uint8` 百分比 0..200 表示 0..100%，255 表示不可用；不能将不可用显示成 0。浮点不可用使用 NaN/明确有效位。
 
-最多 12 个电机。包含健康、效能、故障概率、置信度、故障类型、降级/失败掩码、监测状态和模型质量。健康是当前观测分数，不能称为剩余寿命。
+## GroundStation
 
-电机监测状态不是 `VALID` 时，各电机百分比发送 `255`。GroundStation 因而显示 `N/A`，不会把标定中或无效观测的默认值显示成 0%。
+每种消息独立维护接收时间与 3 s 超时。区分消息未收到、消息超时、学习中、当前不可观测、历史估计过期、模型不可用、有效、退化和故障。模型无效不能显示绿色正常。模式分别显示 OBSERVE、SHADOW、CANDIDATE、ACTIVE；控制模式消息过期时不能继续声称已接管。
 
-### 控制状态 60001
+主页面保持 H/E 和 FTC 摘要，Tooltip 显示 confidence/uncertainty/age/fault type；条件数、预测残差、方向权限和权重在详情页。质量、惯量、CG 的无效状态必须保留，不能为完成度提供假数值。
 
-包含滚转、俯仰、偏航、推力、最小姿态裕度、执行器余量、饱和掩码、恢复进度和控制集成阶段。
+## 检查与当前边界
 
-控制阶段只有以下含义：
+Firmware：`python3 Tools/merivus/verify_ftc_telemetry.py`。
+GroundStation：`tools/dev/test-ftc-telemetry-contract.ps1` 和 `tools/dev/generate-merivus-mavlink.ps1 -Check`（使用锁定生成器及 Python future 依赖）。
 
-| 模式 | 含义 |
-| --- | --- |
-| `DISABLED` | 监测关闭 |
-| `OBSERVE` | 只观测，不计算有效影子分配 |
-| `SHADOW` | 计算影子分配，不下发执行器 |
-| `CANDIDATE` | 产生恢复候选，不下发执行器 |
-| `ACTIVE` | 已有明确执行器命令路径；当前固件不具备 |
-
-版本 1 的发送实现不得设置 `ACTIVE_COMMAND_PATH`，不得报告 `ACTIVE`。
-
-### 极端状态 60002
-
-包含撞击类型、撞击分数/置信度/严重度、失控状态与原因掩码，以及恢复触发、抑制和候选进度。`recovery.active` 只表示候选状态机处于活动阶段，不等于执行器命令路径已接管。
-
-### 诊断 60003
-
-低频输出模型残差、激励、机动强度、外扰、振动、影子分配残差、姿态/角速度误差和 SITL 注入状态。主操作界面不依赖该消息维持基本状态。
-
-## 恢复状态中文映射
-
-| 枚举 | 界面文本 |
-| --- | --- |
-| `DISABLED` | 关闭 |
-| `MONITORING` | 监测 |
-| `DISTURBANCE_DETECTED` | 检测到强扰动 |
-| `RATE_DAMPING` | 角速度抑制 |
-| `THRUST_VECTOR_RECOVERY` | 推力方向恢复 |
-| `ATTITUDE_RECOVERY` | 姿态恢复 |
-| `ALTITUDE_STABILIZATION` | 高度稳定 |
-| `CONTROL_REENTRY` | 恢复正常控制 |
-| `EMERGENCY_LAND` | 紧急降落 |
-| `ABORTED` | 已中止 |
-| `FAILED` | 恢复失败 |
-
-## 过期与兼容
-
-- 每条消息都带 `protocol_version=1`。
-- GroundStation 对每个消息族使用 3 秒超时。过期后显示 `N/A`，不把旧值当成当前状态。
-- 没有 FTC 消息的飞控保持兼容：`vehicle.ftcStatus.available=false`，标准飞行和 ESC UI 不受影响。
-- 版本不匹配时停止解释业务字段，显示明确的协议不兼容提示。
-- 版本 1 内只能在 MAVLink `<extensions/>` 后追加可选字段；改变现有字段类型、缩放、枚举值或语义必须升级协议版本，并评估是否需要新消息 ID。
-
-## 变更流程
-
-1. 同步修改两仓核心 XML并核对 SHA-256。
-2. 用锁定生成器执行严格单位校验。
-3. 重新生成 GroundStation 头文件。
-4. 更新发送端、后端、QML 和本文档。
-5. 运行两仓契约检查、SITL 收发和断流过期测试。
+本阶段协议检查、生成一致性和构建提供软件证据；新 v2 消息实际链路、断链恢复和 UI 回放尚未验证。所有 ACTIVE 默认关闭。
