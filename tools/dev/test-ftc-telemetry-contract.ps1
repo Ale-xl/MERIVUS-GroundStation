@@ -43,10 +43,10 @@ if ($xml.mavlink.messages.message.Count -ne $expectedMessages.Count) {
 }
 
 $generatedExpectations = @{
-    "mavlink_msg_merivus_ftc_motor_status.h" = @("LEN 78", "CRC 29")
-    "mavlink_msg_merivus_ftc_control_status.h" = @("LEN 24", "CRC 153")
+    "mavlink_msg_merivus_ftc_motor_status.h" = @("LEN 153", "MIN_LEN 78", "CRC 29")
+    "mavlink_msg_merivus_ftc_control_status.h" = @("LEN 78", "MIN_LEN 24", "CRC 153")
     "mavlink_msg_merivus_ftc_extreme_status.h" = @("LEN 38", "CRC 136")
-    "mavlink_msg_merivus_ftc_diagnostics.h" = @("LEN 65", "CRC 5")
+    "mavlink_msg_merivus_ftc_diagnostics.h" = @("LEN 117", "MIN_LEN 65", "CRC 5")
 }
 
 foreach ($entry in $generatedExpectations.GetEnumerator()) {
@@ -96,9 +96,12 @@ if (Test-Path $firmwareRoot) {
     }
 
     $controlStream = Join-Path $firmwareRoot "src\modules\mavlink\streams\MERIVUS_FTC_CONTROL_STATUS.hpp"
-    if (Select-String -LiteralPath $controlStream -Pattern "MERIVUS_FTC_CONTROL_(MODE_ACTIVE|FLAGS_ACTIVE_COMMAND_PATH)" -Quiet) {
-        throw "当前固件不得报告 ACTIVE 或 ACTIVE_COMMAND_PATH"
-    }
+    Assert-Contains $controlStream 'if \(_system\.intervention_enabled\)' "ACTIVE 必须由实际仲裁反馈驱动"
+    Assert-Contains $backendHeader 'ProtocolVersion = 2' "后端未切换至 FTC v2"
+    Assert-Contains $backendSource '历史估计过期' "缺少估计年龄过期状态"
+    Assert-Contains $backendSource '消息已过期' "缺少消息超时状态"
+    Assert-Contains $backendSource '模型不可用' "缺少模型无效状态"
+    Assert-Contains $panel 'dataStateText' "电机行没有使用类型化数据状态"
 }
 
 Write-Host "FTC 遥测字段、后端属性、QML 消费与安全语义检查通过。"

@@ -30,6 +30,11 @@ public:
         FailedRole,
         AvailableRole,
         SeverityRole,
+        UncertaintyRole,
+        EstimateAgeRole,
+        DataStateTextRole,
+        LastEffectivenessRole,
+        EstimateValidRole,
     };
 
     explicit FtcMotorStatusModel(QObject* parent = nullptr);
@@ -50,6 +55,12 @@ private:
         double effectiveness = -1.0;
         double faultProbability = -1.0;
         double confidence = -1.0;
+        double uncertainty = -1.0;
+        double estimateAge = -1.0;
+        int estimatorState = 0;
+        int diagnosisState = 0;
+        bool estimateValid = false;
+        bool observable = false;
         uint8_t faultType = MERIVUS_FTC_FAULT_NONE;
         bool degraded = false;
         bool failed = false;
@@ -97,6 +108,12 @@ public:
     Q_PROPERTY(int motorCount READ motorCount NOTIFY statusChanged)
     Q_PROPERTY(QAbstractListModel* motors READ motors CONSTANT)
     Q_PROPERTY(double modelQuality READ modelQuality NOTIFY statusChanged)
+    Q_PROPERTY(bool modelValid READ modelValid NOTIFY statusChanged)
+    Q_PROPERTY(bool baselineLearned READ baselineLearned NOTIFY statusChanged)
+    Q_PROPERTY(bool currentObservable READ currentObservable NOTIFY statusChanged)
+    Q_PROPERTY(double estimateAge READ estimateAge NOTIFY statusChanged)
+    Q_PROPERTY(QString modelStateText READ modelStateText NOTIFY statusChanged)
+    Q_PROPERTY(QVariantMap details READ details NOTIFY statusChanged)
 
     Q_PROPERTY(int authorityState READ authorityState NOTIFY statusChanged)
     Q_PROPERTY(QString authorityStateText READ authorityStateText NOTIFY statusChanged)
@@ -173,6 +190,12 @@ public:
     int motorCount() const { return _motorCount; }
     QAbstractListModel* motors() { return &_motors; }
     double modelQuality() const { return _modelQuality; }
+    bool modelValid() const { return _modelValid && motorAvailable() && !motorStale(); }
+    bool baselineLearned() const { return _baselineLearned; }
+    bool currentObservable() const { return _currentObservable && motorAvailable() && !motorStale(); }
+    double estimateAge() const { return motorAvailable() && !motorStale() ? _estimateAge : -1.0; }
+    QString modelStateText() const;
+    QVariantMap details() const { return _details; }
 
     int authorityState() const { return _authorityState; }
     QString authorityStateText() const;
@@ -232,7 +255,7 @@ private slots:
     void _refreshStale();
 
 private:
-    static constexpr int ProtocolVersion = 1;
+    static constexpr int ProtocolVersion = 2;
     static constexpr qint64 StaleTimeoutMs = 3000;
 
     static double _decodePercentage(uint8_t value);
@@ -262,6 +285,13 @@ private:
     int _controlMode = MERIVUS_FTC_CONTROL_MODE_DISABLED;
     int _motorCount = 0;
     double _modelQuality = -1.0;
+    bool _modelValid = false;
+    bool _baselineLearned = false;
+    bool _currentObservable = false;
+    bool _authorityValid = false;
+    int _estimatorState = 0;
+    double _estimateAge = -1.0;
+    QVariantMap _details;
     int _authorityState = MERIVUS_FTC_AUTHORITY_STATE_FULL_CONTROL;
     double _rollAuthority = -1.0;
     double _pitchAuthority = -1.0;

@@ -21,23 +21,35 @@ typedef struct __mavlink_merivus_ftc_control_status_t {
  uint8_t actuator_headroom_pct; /*<  Remaining actuator headroom.*/
  uint8_t system_confidence_pct; /*<  Aggregated FTC confidence.*/
  uint8_t recovery_progress_pct; /*<  Recovery-candidate state progress.*/
+ float positive_authority[3]; /*<  Positive roll pitch yaw reachable increments in nominal matrix units.*/
+ float negative_authority[3]; /*<  Negative roll pitch yaw reachable increments in nominal matrix units.*/
+ float thrust_up; /*<  Reachable upward thrust increment.*/
+ float thrust_down; /*<  Reachable downward thrust increment.*/
+ float reachable_residual; /*<  Shadow allocation prediction residual norm.*/
+ uint32_t allocation_fallback; /*<  Active allocator fallback reason mask.*/
+ uint32_t recovery_fallback; /*<  Recovery arbitration fallback reason mask.*/
+ float arbitration_weight; /*<  Actual recovery input ownership weight.*/
+ float reentry_weight; /*<  Requested recovery ownership during reentry.*/
+ uint8_t allocation_active; /*<  Dynamic matrix differs from nominal.*/
+ uint8_t recovery_active; /*<  Recovery input arbitration is applied.*/
 } mavlink_merivus_ftc_control_status_t;
 
-#define MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN 24
+#define MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN 78
 #define MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN 24
-#define MAVLINK_MSG_ID_60001_LEN 24
+#define MAVLINK_MSG_ID_60001_LEN 78
 #define MAVLINK_MSG_ID_60001_MIN_LEN 24
 
 #define MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC 153
 #define MAVLINK_MSG_ID_60001_CRC 153
 
-
+#define MAVLINK_MSG_MERIVUS_FTC_CONTROL_STATUS_FIELD_POSITIVE_AUTHORITY_LEN 3
+#define MAVLINK_MSG_MERIVUS_FTC_CONTROL_STATUS_FIELD_NEGATIVE_AUTHORITY_LEN 3
 
 #if MAVLINK_COMMAND_24BIT
 #define MAVLINK_MESSAGE_INFO_MERIVUS_FTC_CONTROL_STATUS { \
     60001, \
     "MERIVUS_FTC_CONTROL_STATUS", \
-    16, \
+    27, \
     {  { "time_usec", NULL, MAVLINK_TYPE_UINT64_T, 0, 0, offsetof(mavlink_merivus_ftc_control_status_t, time_usec) }, \
          { "saturated_mask", NULL, MAVLINK_TYPE_UINT16_T, 0, 8, offsetof(mavlink_merivus_ftc_control_status_t, saturated_mask) }, \
          { "protocol_version", NULL, MAVLINK_TYPE_UINT8_T, 0, 10, offsetof(mavlink_merivus_ftc_control_status_t, protocol_version) }, \
@@ -54,12 +66,23 @@ typedef struct __mavlink_merivus_ftc_control_status_t {
          { "actuator_headroom_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 21, offsetof(mavlink_merivus_ftc_control_status_t, actuator_headroom_pct) }, \
          { "system_confidence_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 22, offsetof(mavlink_merivus_ftc_control_status_t, system_confidence_pct) }, \
          { "recovery_progress_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 23, offsetof(mavlink_merivus_ftc_control_status_t, recovery_progress_pct) }, \
+         { "positive_authority", NULL, MAVLINK_TYPE_FLOAT, 3, 24, offsetof(mavlink_merivus_ftc_control_status_t, positive_authority) }, \
+         { "negative_authority", NULL, MAVLINK_TYPE_FLOAT, 3, 36, offsetof(mavlink_merivus_ftc_control_status_t, negative_authority) }, \
+         { "thrust_up", NULL, MAVLINK_TYPE_FLOAT, 0, 48, offsetof(mavlink_merivus_ftc_control_status_t, thrust_up) }, \
+         { "thrust_down", NULL, MAVLINK_TYPE_FLOAT, 0, 52, offsetof(mavlink_merivus_ftc_control_status_t, thrust_down) }, \
+         { "reachable_residual", NULL, MAVLINK_TYPE_FLOAT, 0, 56, offsetof(mavlink_merivus_ftc_control_status_t, reachable_residual) }, \
+         { "allocation_fallback", NULL, MAVLINK_TYPE_UINT32_T, 0, 60, offsetof(mavlink_merivus_ftc_control_status_t, allocation_fallback) }, \
+         { "recovery_fallback", NULL, MAVLINK_TYPE_UINT32_T, 0, 64, offsetof(mavlink_merivus_ftc_control_status_t, recovery_fallback) }, \
+         { "arbitration_weight", NULL, MAVLINK_TYPE_FLOAT, 0, 68, offsetof(mavlink_merivus_ftc_control_status_t, arbitration_weight) }, \
+         { "reentry_weight", NULL, MAVLINK_TYPE_FLOAT, 0, 72, offsetof(mavlink_merivus_ftc_control_status_t, reentry_weight) }, \
+         { "allocation_active", NULL, MAVLINK_TYPE_UINT8_T, 0, 76, offsetof(mavlink_merivus_ftc_control_status_t, allocation_active) }, \
+         { "recovery_active", NULL, MAVLINK_TYPE_UINT8_T, 0, 77, offsetof(mavlink_merivus_ftc_control_status_t, recovery_active) }, \
          } \
 }
 #else
 #define MAVLINK_MESSAGE_INFO_MERIVUS_FTC_CONTROL_STATUS { \
     "MERIVUS_FTC_CONTROL_STATUS", \
-    16, \
+    27, \
     {  { "time_usec", NULL, MAVLINK_TYPE_UINT64_T, 0, 0, offsetof(mavlink_merivus_ftc_control_status_t, time_usec) }, \
          { "saturated_mask", NULL, MAVLINK_TYPE_UINT16_T, 0, 8, offsetof(mavlink_merivus_ftc_control_status_t, saturated_mask) }, \
          { "protocol_version", NULL, MAVLINK_TYPE_UINT8_T, 0, 10, offsetof(mavlink_merivus_ftc_control_status_t, protocol_version) }, \
@@ -76,6 +99,17 @@ typedef struct __mavlink_merivus_ftc_control_status_t {
          { "actuator_headroom_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 21, offsetof(mavlink_merivus_ftc_control_status_t, actuator_headroom_pct) }, \
          { "system_confidence_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 22, offsetof(mavlink_merivus_ftc_control_status_t, system_confidence_pct) }, \
          { "recovery_progress_pct", NULL, MAVLINK_TYPE_UINT8_T, 0, 23, offsetof(mavlink_merivus_ftc_control_status_t, recovery_progress_pct) }, \
+         { "positive_authority", NULL, MAVLINK_TYPE_FLOAT, 3, 24, offsetof(mavlink_merivus_ftc_control_status_t, positive_authority) }, \
+         { "negative_authority", NULL, MAVLINK_TYPE_FLOAT, 3, 36, offsetof(mavlink_merivus_ftc_control_status_t, negative_authority) }, \
+         { "thrust_up", NULL, MAVLINK_TYPE_FLOAT, 0, 48, offsetof(mavlink_merivus_ftc_control_status_t, thrust_up) }, \
+         { "thrust_down", NULL, MAVLINK_TYPE_FLOAT, 0, 52, offsetof(mavlink_merivus_ftc_control_status_t, thrust_down) }, \
+         { "reachable_residual", NULL, MAVLINK_TYPE_FLOAT, 0, 56, offsetof(mavlink_merivus_ftc_control_status_t, reachable_residual) }, \
+         { "allocation_fallback", NULL, MAVLINK_TYPE_UINT32_T, 0, 60, offsetof(mavlink_merivus_ftc_control_status_t, allocation_fallback) }, \
+         { "recovery_fallback", NULL, MAVLINK_TYPE_UINT32_T, 0, 64, offsetof(mavlink_merivus_ftc_control_status_t, recovery_fallback) }, \
+         { "arbitration_weight", NULL, MAVLINK_TYPE_FLOAT, 0, 68, offsetof(mavlink_merivus_ftc_control_status_t, arbitration_weight) }, \
+         { "reentry_weight", NULL, MAVLINK_TYPE_FLOAT, 0, 72, offsetof(mavlink_merivus_ftc_control_status_t, reentry_weight) }, \
+         { "allocation_active", NULL, MAVLINK_TYPE_UINT8_T, 0, 76, offsetof(mavlink_merivus_ftc_control_status_t, allocation_active) }, \
+         { "recovery_active", NULL, MAVLINK_TYPE_UINT8_T, 0, 77, offsetof(mavlink_merivus_ftc_control_status_t, recovery_active) }, \
          } \
 }
 #endif
@@ -102,10 +136,21 @@ typedef struct __mavlink_merivus_ftc_control_status_t {
  * @param actuator_headroom_pct  Remaining actuator headroom.
  * @param system_confidence_pct  Aggregated FTC confidence.
  * @param recovery_progress_pct  Recovery-candidate state progress.
+ * @param positive_authority  Positive roll pitch yaw reachable increments in nominal matrix units.
+ * @param negative_authority  Negative roll pitch yaw reachable increments in nominal matrix units.
+ * @param thrust_up  Reachable upward thrust increment.
+ * @param thrust_down  Reachable downward thrust increment.
+ * @param reachable_residual  Shadow allocation prediction residual norm.
+ * @param allocation_fallback  Active allocator fallback reason mask.
+ * @param recovery_fallback  Recovery arbitration fallback reason mask.
+ * @param arbitration_weight  Actual recovery input ownership weight.
+ * @param reentry_weight  Requested recovery ownership during reentry.
+ * @param allocation_active  Dynamic matrix differs from nominal.
+ * @param recovery_active  Recovery input arbitration is applied.
  * @return length of the message in bytes (excluding serial stream start sign)
  */
 static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
-                               uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct)
+                               uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct, const float *positive_authority, const float *negative_authority, float thrust_up, float thrust_down, float reachable_residual, uint32_t allocation_fallback, uint32_t recovery_fallback, float arbitration_weight, float reentry_weight, uint8_t allocation_active, uint8_t recovery_active)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
     char buf[MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN];
@@ -125,7 +170,17 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack(uint8_t syste
     _mav_put_uint8_t(buf, 21, actuator_headroom_pct);
     _mav_put_uint8_t(buf, 22, system_confidence_pct);
     _mav_put_uint8_t(buf, 23, recovery_progress_pct);
-
+    _mav_put_float(buf, 48, thrust_up);
+    _mav_put_float(buf, 52, thrust_down);
+    _mav_put_float(buf, 56, reachable_residual);
+    _mav_put_uint32_t(buf, 60, allocation_fallback);
+    _mav_put_uint32_t(buf, 64, recovery_fallback);
+    _mav_put_float(buf, 68, arbitration_weight);
+    _mav_put_float(buf, 72, reentry_weight);
+    _mav_put_uint8_t(buf, 76, allocation_active);
+    _mav_put_uint8_t(buf, 77, recovery_active);
+    _mav_put_float_array(buf, 24, positive_authority, 3);
+    _mav_put_float_array(buf, 36, negative_authority, 3);
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), buf, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN);
 #else
     mavlink_merivus_ftc_control_status_t packet;
@@ -145,7 +200,17 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack(uint8_t syste
     packet.actuator_headroom_pct = actuator_headroom_pct;
     packet.system_confidence_pct = system_confidence_pct;
     packet.recovery_progress_pct = recovery_progress_pct;
-
+    packet.thrust_up = thrust_up;
+    packet.thrust_down = thrust_down;
+    packet.reachable_residual = reachable_residual;
+    packet.allocation_fallback = allocation_fallback;
+    packet.recovery_fallback = recovery_fallback;
+    packet.arbitration_weight = arbitration_weight;
+    packet.reentry_weight = reentry_weight;
+    packet.allocation_active = allocation_active;
+    packet.recovery_active = recovery_active;
+    mav_array_memcpy(packet.positive_authority, positive_authority, sizeof(float)*3);
+    mav_array_memcpy(packet.negative_authority, negative_authority, sizeof(float)*3);
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), &packet, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN);
 #endif
 
@@ -175,11 +240,22 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack(uint8_t syste
  * @param actuator_headroom_pct  Remaining actuator headroom.
  * @param system_confidence_pct  Aggregated FTC confidence.
  * @param recovery_progress_pct  Recovery-candidate state progress.
+ * @param positive_authority  Positive roll pitch yaw reachable increments in nominal matrix units.
+ * @param negative_authority  Negative roll pitch yaw reachable increments in nominal matrix units.
+ * @param thrust_up  Reachable upward thrust increment.
+ * @param thrust_down  Reachable downward thrust increment.
+ * @param reachable_residual  Shadow allocation prediction residual norm.
+ * @param allocation_fallback  Active allocator fallback reason mask.
+ * @param recovery_fallback  Recovery arbitration fallback reason mask.
+ * @param arbitration_weight  Actual recovery input ownership weight.
+ * @param reentry_weight  Requested recovery ownership during reentry.
+ * @param allocation_active  Dynamic matrix differs from nominal.
+ * @param recovery_active  Recovery input arbitration is applied.
  * @return length of the message in bytes (excluding serial stream start sign)
  */
 static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack_chan(uint8_t system_id, uint8_t component_id, uint8_t chan,
                                mavlink_message_t* msg,
-                                   uint64_t time_usec,uint16_t saturated_mask,uint8_t protocol_version,uint8_t system_state,uint8_t authority_state,uint8_t control_mode,uint8_t recovery_state,uint8_t flags,uint8_t roll_authority_pct,uint8_t pitch_authority_pct,uint8_t yaw_authority_pct,uint8_t thrust_authority_pct,uint8_t minimum_attitude_authority_pct,uint8_t actuator_headroom_pct,uint8_t system_confidence_pct,uint8_t recovery_progress_pct)
+                                   uint64_t time_usec,uint16_t saturated_mask,uint8_t protocol_version,uint8_t system_state,uint8_t authority_state,uint8_t control_mode,uint8_t recovery_state,uint8_t flags,uint8_t roll_authority_pct,uint8_t pitch_authority_pct,uint8_t yaw_authority_pct,uint8_t thrust_authority_pct,uint8_t minimum_attitude_authority_pct,uint8_t actuator_headroom_pct,uint8_t system_confidence_pct,uint8_t recovery_progress_pct,const float *positive_authority,const float *negative_authority,float thrust_up,float thrust_down,float reachable_residual,uint32_t allocation_fallback,uint32_t recovery_fallback,float arbitration_weight,float reentry_weight,uint8_t allocation_active,uint8_t recovery_active)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
     char buf[MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN];
@@ -199,7 +275,17 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack_chan(uint8_t 
     _mav_put_uint8_t(buf, 21, actuator_headroom_pct);
     _mav_put_uint8_t(buf, 22, system_confidence_pct);
     _mav_put_uint8_t(buf, 23, recovery_progress_pct);
-
+    _mav_put_float(buf, 48, thrust_up);
+    _mav_put_float(buf, 52, thrust_down);
+    _mav_put_float(buf, 56, reachable_residual);
+    _mav_put_uint32_t(buf, 60, allocation_fallback);
+    _mav_put_uint32_t(buf, 64, recovery_fallback);
+    _mav_put_float(buf, 68, arbitration_weight);
+    _mav_put_float(buf, 72, reentry_weight);
+    _mav_put_uint8_t(buf, 76, allocation_active);
+    _mav_put_uint8_t(buf, 77, recovery_active);
+    _mav_put_float_array(buf, 24, positive_authority, 3);
+    _mav_put_float_array(buf, 36, negative_authority, 3);
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), buf, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN);
 #else
     mavlink_merivus_ftc_control_status_t packet;
@@ -219,7 +305,17 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack_chan(uint8_t 
     packet.actuator_headroom_pct = actuator_headroom_pct;
     packet.system_confidence_pct = system_confidence_pct;
     packet.recovery_progress_pct = recovery_progress_pct;
-
+    packet.thrust_up = thrust_up;
+    packet.thrust_down = thrust_down;
+    packet.reachable_residual = reachable_residual;
+    packet.allocation_fallback = allocation_fallback;
+    packet.recovery_fallback = recovery_fallback;
+    packet.arbitration_weight = arbitration_weight;
+    packet.reentry_weight = reentry_weight;
+    packet.allocation_active = allocation_active;
+    packet.recovery_active = recovery_active;
+    mav_array_memcpy(packet.positive_authority, positive_authority, sizeof(float)*3);
+    mav_array_memcpy(packet.negative_authority, negative_authority, sizeof(float)*3);
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), &packet, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN);
 #endif
 
@@ -237,7 +333,7 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_pack_chan(uint8_t 
  */
 static inline uint16_t mavlink_msg_merivus_ftc_control_status_encode(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg, const mavlink_merivus_ftc_control_status_t* merivus_ftc_control_status)
 {
-    return mavlink_msg_merivus_ftc_control_status_pack(system_id, component_id, msg, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct);
+    return mavlink_msg_merivus_ftc_control_status_pack(system_id, component_id, msg, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct, merivus_ftc_control_status->positive_authority, merivus_ftc_control_status->negative_authority, merivus_ftc_control_status->thrust_up, merivus_ftc_control_status->thrust_down, merivus_ftc_control_status->reachable_residual, merivus_ftc_control_status->allocation_fallback, merivus_ftc_control_status->recovery_fallback, merivus_ftc_control_status->arbitration_weight, merivus_ftc_control_status->reentry_weight, merivus_ftc_control_status->allocation_active, merivus_ftc_control_status->recovery_active);
 }
 
 /**
@@ -251,7 +347,7 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_encode(uint8_t sys
  */
 static inline uint16_t mavlink_msg_merivus_ftc_control_status_encode_chan(uint8_t system_id, uint8_t component_id, uint8_t chan, mavlink_message_t* msg, const mavlink_merivus_ftc_control_status_t* merivus_ftc_control_status)
 {
-    return mavlink_msg_merivus_ftc_control_status_pack_chan(system_id, component_id, chan, msg, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct);
+    return mavlink_msg_merivus_ftc_control_status_pack_chan(system_id, component_id, chan, msg, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct, merivus_ftc_control_status->positive_authority, merivus_ftc_control_status->negative_authority, merivus_ftc_control_status->thrust_up, merivus_ftc_control_status->thrust_down, merivus_ftc_control_status->reachable_residual, merivus_ftc_control_status->allocation_fallback, merivus_ftc_control_status->recovery_fallback, merivus_ftc_control_status->arbitration_weight, merivus_ftc_control_status->reentry_weight, merivus_ftc_control_status->allocation_active, merivus_ftc_control_status->recovery_active);
 }
 
 /**
@@ -274,10 +370,21 @@ static inline uint16_t mavlink_msg_merivus_ftc_control_status_encode_chan(uint8_
  * @param actuator_headroom_pct  Remaining actuator headroom.
  * @param system_confidence_pct  Aggregated FTC confidence.
  * @param recovery_progress_pct  Recovery-candidate state progress.
+ * @param positive_authority  Positive roll pitch yaw reachable increments in nominal matrix units.
+ * @param negative_authority  Negative roll pitch yaw reachable increments in nominal matrix units.
+ * @param thrust_up  Reachable upward thrust increment.
+ * @param thrust_down  Reachable downward thrust increment.
+ * @param reachable_residual  Shadow allocation prediction residual norm.
+ * @param allocation_fallback  Active allocator fallback reason mask.
+ * @param recovery_fallback  Recovery arbitration fallback reason mask.
+ * @param arbitration_weight  Actual recovery input ownership weight.
+ * @param reentry_weight  Requested recovery ownership during reentry.
+ * @param allocation_active  Dynamic matrix differs from nominal.
+ * @param recovery_active  Recovery input arbitration is applied.
  */
 #ifdef MAVLINK_USE_CONVENIENCE_FUNCTIONS
 
-static inline void mavlink_msg_merivus_ftc_control_status_send(mavlink_channel_t chan, uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct)
+static inline void mavlink_msg_merivus_ftc_control_status_send(mavlink_channel_t chan, uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct, const float *positive_authority, const float *negative_authority, float thrust_up, float thrust_down, float reachable_residual, uint32_t allocation_fallback, uint32_t recovery_fallback, float arbitration_weight, float reentry_weight, uint8_t allocation_active, uint8_t recovery_active)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
     char buf[MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN];
@@ -297,7 +404,17 @@ static inline void mavlink_msg_merivus_ftc_control_status_send(mavlink_channel_t
     _mav_put_uint8_t(buf, 21, actuator_headroom_pct);
     _mav_put_uint8_t(buf, 22, system_confidence_pct);
     _mav_put_uint8_t(buf, 23, recovery_progress_pct);
-
+    _mav_put_float(buf, 48, thrust_up);
+    _mav_put_float(buf, 52, thrust_down);
+    _mav_put_float(buf, 56, reachable_residual);
+    _mav_put_uint32_t(buf, 60, allocation_fallback);
+    _mav_put_uint32_t(buf, 64, recovery_fallback);
+    _mav_put_float(buf, 68, arbitration_weight);
+    _mav_put_float(buf, 72, reentry_weight);
+    _mav_put_uint8_t(buf, 76, allocation_active);
+    _mav_put_uint8_t(buf, 77, recovery_active);
+    _mav_put_float_array(buf, 24, positive_authority, 3);
+    _mav_put_float_array(buf, 36, negative_authority, 3);
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS, buf, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC);
 #else
     mavlink_merivus_ftc_control_status_t packet;
@@ -317,7 +434,17 @@ static inline void mavlink_msg_merivus_ftc_control_status_send(mavlink_channel_t
     packet.actuator_headroom_pct = actuator_headroom_pct;
     packet.system_confidence_pct = system_confidence_pct;
     packet.recovery_progress_pct = recovery_progress_pct;
-
+    packet.thrust_up = thrust_up;
+    packet.thrust_down = thrust_down;
+    packet.reachable_residual = reachable_residual;
+    packet.allocation_fallback = allocation_fallback;
+    packet.recovery_fallback = recovery_fallback;
+    packet.arbitration_weight = arbitration_weight;
+    packet.reentry_weight = reentry_weight;
+    packet.allocation_active = allocation_active;
+    packet.recovery_active = recovery_active;
+    mav_array_memcpy(packet.positive_authority, positive_authority, sizeof(float)*3);
+    mav_array_memcpy(packet.negative_authority, negative_authority, sizeof(float)*3);
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS, (const char *)&packet, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC);
 #endif
 }
@@ -330,7 +457,7 @@ static inline void mavlink_msg_merivus_ftc_control_status_send(mavlink_channel_t
 static inline void mavlink_msg_merivus_ftc_control_status_send_struct(mavlink_channel_t chan, const mavlink_merivus_ftc_control_status_t* merivus_ftc_control_status)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
-    mavlink_msg_merivus_ftc_control_status_send(chan, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct);
+    mavlink_msg_merivus_ftc_control_status_send(chan, merivus_ftc_control_status->time_usec, merivus_ftc_control_status->saturated_mask, merivus_ftc_control_status->protocol_version, merivus_ftc_control_status->system_state, merivus_ftc_control_status->authority_state, merivus_ftc_control_status->control_mode, merivus_ftc_control_status->recovery_state, merivus_ftc_control_status->flags, merivus_ftc_control_status->roll_authority_pct, merivus_ftc_control_status->pitch_authority_pct, merivus_ftc_control_status->yaw_authority_pct, merivus_ftc_control_status->thrust_authority_pct, merivus_ftc_control_status->minimum_attitude_authority_pct, merivus_ftc_control_status->actuator_headroom_pct, merivus_ftc_control_status->system_confidence_pct, merivus_ftc_control_status->recovery_progress_pct, merivus_ftc_control_status->positive_authority, merivus_ftc_control_status->negative_authority, merivus_ftc_control_status->thrust_up, merivus_ftc_control_status->thrust_down, merivus_ftc_control_status->reachable_residual, merivus_ftc_control_status->allocation_fallback, merivus_ftc_control_status->recovery_fallback, merivus_ftc_control_status->arbitration_weight, merivus_ftc_control_status->reentry_weight, merivus_ftc_control_status->allocation_active, merivus_ftc_control_status->recovery_active);
 #else
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS, (const char *)merivus_ftc_control_status, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC);
 #endif
@@ -344,7 +471,7 @@ static inline void mavlink_msg_merivus_ftc_control_status_send_struct(mavlink_ch
   is usually the receive buffer for the channel, and allows a reply to an
   incoming message with minimum stack space usage.
  */
-static inline void mavlink_msg_merivus_ftc_control_status_send_buf(mavlink_message_t *msgbuf, mavlink_channel_t chan,  uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct)
+static inline void mavlink_msg_merivus_ftc_control_status_send_buf(mavlink_message_t *msgbuf, mavlink_channel_t chan,  uint64_t time_usec, uint16_t saturated_mask, uint8_t protocol_version, uint8_t system_state, uint8_t authority_state, uint8_t control_mode, uint8_t recovery_state, uint8_t flags, uint8_t roll_authority_pct, uint8_t pitch_authority_pct, uint8_t yaw_authority_pct, uint8_t thrust_authority_pct, uint8_t minimum_attitude_authority_pct, uint8_t actuator_headroom_pct, uint8_t system_confidence_pct, uint8_t recovery_progress_pct, const float *positive_authority, const float *negative_authority, float thrust_up, float thrust_down, float reachable_residual, uint32_t allocation_fallback, uint32_t recovery_fallback, float arbitration_weight, float reentry_weight, uint8_t allocation_active, uint8_t recovery_active)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
     char *buf = (char *)msgbuf;
@@ -364,7 +491,17 @@ static inline void mavlink_msg_merivus_ftc_control_status_send_buf(mavlink_messa
     _mav_put_uint8_t(buf, 21, actuator_headroom_pct);
     _mav_put_uint8_t(buf, 22, system_confidence_pct);
     _mav_put_uint8_t(buf, 23, recovery_progress_pct);
-
+    _mav_put_float(buf, 48, thrust_up);
+    _mav_put_float(buf, 52, thrust_down);
+    _mav_put_float(buf, 56, reachable_residual);
+    _mav_put_uint32_t(buf, 60, allocation_fallback);
+    _mav_put_uint32_t(buf, 64, recovery_fallback);
+    _mav_put_float(buf, 68, arbitration_weight);
+    _mav_put_float(buf, 72, reentry_weight);
+    _mav_put_uint8_t(buf, 76, allocation_active);
+    _mav_put_uint8_t(buf, 77, recovery_active);
+    _mav_put_float_array(buf, 24, positive_authority, 3);
+    _mav_put_float_array(buf, 36, negative_authority, 3);
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS, buf, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC);
 #else
     mavlink_merivus_ftc_control_status_t *packet = (mavlink_merivus_ftc_control_status_t *)msgbuf;
@@ -384,7 +521,17 @@ static inline void mavlink_msg_merivus_ftc_control_status_send_buf(mavlink_messa
     packet->actuator_headroom_pct = actuator_headroom_pct;
     packet->system_confidence_pct = system_confidence_pct;
     packet->recovery_progress_pct = recovery_progress_pct;
-
+    packet->thrust_up = thrust_up;
+    packet->thrust_down = thrust_down;
+    packet->reachable_residual = reachable_residual;
+    packet->allocation_fallback = allocation_fallback;
+    packet->recovery_fallback = recovery_fallback;
+    packet->arbitration_weight = arbitration_weight;
+    packet->reentry_weight = reentry_weight;
+    packet->allocation_active = allocation_active;
+    packet->recovery_active = recovery_active;
+    mav_array_memcpy(packet->positive_authority, positive_authority, sizeof(float)*3);
+    mav_array_memcpy(packet->negative_authority, negative_authority, sizeof(float)*3);
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS, (const char *)packet, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_MIN_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_CRC);
 #endif
 }
@@ -556,6 +703,116 @@ static inline uint8_t mavlink_msg_merivus_ftc_control_status_get_recovery_progre
 }
 
 /**
+ * @brief Get field positive_authority from merivus_ftc_control_status message
+ *
+ * @return  Positive roll pitch yaw reachable increments in nominal matrix units.
+ */
+static inline uint16_t mavlink_msg_merivus_ftc_control_status_get_positive_authority(const mavlink_message_t* msg, float *positive_authority)
+{
+    return _MAV_RETURN_float_array(msg, positive_authority, 3,  24);
+}
+
+/**
+ * @brief Get field negative_authority from merivus_ftc_control_status message
+ *
+ * @return  Negative roll pitch yaw reachable increments in nominal matrix units.
+ */
+static inline uint16_t mavlink_msg_merivus_ftc_control_status_get_negative_authority(const mavlink_message_t* msg, float *negative_authority)
+{
+    return _MAV_RETURN_float_array(msg, negative_authority, 3,  36);
+}
+
+/**
+ * @brief Get field thrust_up from merivus_ftc_control_status message
+ *
+ * @return  Reachable upward thrust increment.
+ */
+static inline float mavlink_msg_merivus_ftc_control_status_get_thrust_up(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_float(msg,  48);
+}
+
+/**
+ * @brief Get field thrust_down from merivus_ftc_control_status message
+ *
+ * @return  Reachable downward thrust increment.
+ */
+static inline float mavlink_msg_merivus_ftc_control_status_get_thrust_down(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_float(msg,  52);
+}
+
+/**
+ * @brief Get field reachable_residual from merivus_ftc_control_status message
+ *
+ * @return  Shadow allocation prediction residual norm.
+ */
+static inline float mavlink_msg_merivus_ftc_control_status_get_reachable_residual(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_float(msg,  56);
+}
+
+/**
+ * @brief Get field allocation_fallback from merivus_ftc_control_status message
+ *
+ * @return  Active allocator fallback reason mask.
+ */
+static inline uint32_t mavlink_msg_merivus_ftc_control_status_get_allocation_fallback(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_uint32_t(msg,  60);
+}
+
+/**
+ * @brief Get field recovery_fallback from merivus_ftc_control_status message
+ *
+ * @return  Recovery arbitration fallback reason mask.
+ */
+static inline uint32_t mavlink_msg_merivus_ftc_control_status_get_recovery_fallback(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_uint32_t(msg,  64);
+}
+
+/**
+ * @brief Get field arbitration_weight from merivus_ftc_control_status message
+ *
+ * @return  Actual recovery input ownership weight.
+ */
+static inline float mavlink_msg_merivus_ftc_control_status_get_arbitration_weight(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_float(msg,  68);
+}
+
+/**
+ * @brief Get field reentry_weight from merivus_ftc_control_status message
+ *
+ * @return  Requested recovery ownership during reentry.
+ */
+static inline float mavlink_msg_merivus_ftc_control_status_get_reentry_weight(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_float(msg,  72);
+}
+
+/**
+ * @brief Get field allocation_active from merivus_ftc_control_status message
+ *
+ * @return  Dynamic matrix differs from nominal.
+ */
+static inline uint8_t mavlink_msg_merivus_ftc_control_status_get_allocation_active(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_uint8_t(msg,  76);
+}
+
+/**
+ * @brief Get field recovery_active from merivus_ftc_control_status message
+ *
+ * @return  Recovery input arbitration is applied.
+ */
+static inline uint8_t mavlink_msg_merivus_ftc_control_status_get_recovery_active(const mavlink_message_t* msg)
+{
+    return _MAV_RETURN_uint8_t(msg,  77);
+}
+
+/**
  * @brief Decode a merivus_ftc_control_status message into a struct
  *
  * @param msg The message to decode
@@ -580,6 +837,17 @@ static inline void mavlink_msg_merivus_ftc_control_status_decode(const mavlink_m
     merivus_ftc_control_status->actuator_headroom_pct = mavlink_msg_merivus_ftc_control_status_get_actuator_headroom_pct(msg);
     merivus_ftc_control_status->system_confidence_pct = mavlink_msg_merivus_ftc_control_status_get_system_confidence_pct(msg);
     merivus_ftc_control_status->recovery_progress_pct = mavlink_msg_merivus_ftc_control_status_get_recovery_progress_pct(msg);
+    mavlink_msg_merivus_ftc_control_status_get_positive_authority(msg, merivus_ftc_control_status->positive_authority);
+    mavlink_msg_merivus_ftc_control_status_get_negative_authority(msg, merivus_ftc_control_status->negative_authority);
+    merivus_ftc_control_status->thrust_up = mavlink_msg_merivus_ftc_control_status_get_thrust_up(msg);
+    merivus_ftc_control_status->thrust_down = mavlink_msg_merivus_ftc_control_status_get_thrust_down(msg);
+    merivus_ftc_control_status->reachable_residual = mavlink_msg_merivus_ftc_control_status_get_reachable_residual(msg);
+    merivus_ftc_control_status->allocation_fallback = mavlink_msg_merivus_ftc_control_status_get_allocation_fallback(msg);
+    merivus_ftc_control_status->recovery_fallback = mavlink_msg_merivus_ftc_control_status_get_recovery_fallback(msg);
+    merivus_ftc_control_status->arbitration_weight = mavlink_msg_merivus_ftc_control_status_get_arbitration_weight(msg);
+    merivus_ftc_control_status->reentry_weight = mavlink_msg_merivus_ftc_control_status_get_reentry_weight(msg);
+    merivus_ftc_control_status->allocation_active = mavlink_msg_merivus_ftc_control_status_get_allocation_active(msg);
+    merivus_ftc_control_status->recovery_active = mavlink_msg_merivus_ftc_control_status_get_recovery_active(msg);
 #else
         uint8_t len = msg->len < MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN? msg->len : MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN;
         memset(merivus_ftc_control_status, 0, MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS_LEN);

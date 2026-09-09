@@ -248,7 +248,7 @@ Rectangle {
                     model: root.ftc ? root.ftc.motors : 0
                     delegate: Rectangle {
                         width: ListView.view.width
-                        height: 38
+                        height: 48
                         radius: 4
                         color: qgcPal.window
                         border.color: root.statusPalette.colorFor(severity)
@@ -259,12 +259,20 @@ Rectangle {
                             QGCLabel { Layout.fillWidth: true; text: available ? qsTr("健康 %1").arg(root.percentText(health)) : qsTr("健康 N/A"); color: qgcPal.text }
                             QGCLabel { Layout.fillWidth: true; text: available ? qsTr("效能 %1").arg(root.percentText(effectiveness)) : qsTr("效能 N/A"); color: qgcPal.text }
                             QGCLabel { Layout.fillWidth: true; text: available ? qsTr("故障概率 %1").arg(root.percentText(faultProbability)) : qsTr("故障概率 N/A"); color: qgcPal.text }
-                            QGCLabel { Layout.preferredWidth: 110; text: available ? faultTypeText : qsTr("数据已过期"); color: root.statusPalette.colorFor(severity); elide: Text.ElideRight }
+                            QGCLabel { Layout.preferredWidth: 135; text: dataStateText; color: root.statusPalette.colorFor(severity); elide: Text.ElideRight }
                         }
                     }
                 }
             }
 
+            QGCLabel {
+                Layout.fillWidth: true
+                text: root.ftc ? qsTr("估计：%1 · 基线 %2 · 年龄 %3 s").arg(root.ftc.modelStateText)
+                      .arg(root.ftc.baselineLearned ? qsTr("已学习") : qsTr("未完成"))
+                      .arg(root.ftc.estimateAge >= 0 ? Number(root.ftc.estimateAge).toFixed(2) : "N/A") : "N/A"
+                color: qgcPal.text
+                wrapMode: Text.WordWrap
+            }
             QGCLabel {
                 Layout.fillWidth: true
                 text: root.ftc && root.ftc.diagnosticsAvailable && !root.ftc.diagnosticsStale
@@ -273,6 +281,13 @@ Rectangle {
                         .arg(Number(root.ftc.allocationResidualNorm).toFixed(3))
                         .arg(Number(root.ftc.vibrationScore).toFixed(3))
                         .arg(Number(root.ftc.systemReasonMask).toString(16))
+                        + "\n" + qsTr("条件数 %1 · 预测残差 %2 · 更新 %3 · 复位 %4")
+                        .arg(Number(root.ftc.details.conditionNumber).toFixed(1))
+                        .arg(Number(root.ftc.details.predictionResidual).toFixed(3))
+                        .arg(root.ftc.details.updateCount).arg(root.ftc.details.resetCount)
+                        + "\n" + qsTr("正向裕度 %1 · 负向裕度 %2 · 恢复权重 %3")
+                        .arg(root.ftc.controlAvailable && !root.ftc.controlStale ? root.ftc.details.positiveAuthority : "N/A").arg(root.ftc.controlAvailable && !root.ftc.controlStale ? root.ftc.details.negativeAuthority : "N/A")
+                        .arg(root.ftc.controlAvailable && !root.ftc.controlStale ? Number(root.ftc.details.arbitrationWeight).toFixed(2) : "N/A")
                       : qsTr("诊断数据：N/A")
                 color: qgcPal.colorGrey
                 wrapMode: Text.WordWrap

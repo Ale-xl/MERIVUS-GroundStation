@@ -271,7 +271,9 @@ function escFact(vehicle, prefix, motorIndex) {
                tr("FTC 健康：%1（不是剩余寿命）").arg(ftcPercentText(motor.health)) + "\n" +
                tr("FTC 效能：%1").arg(ftcPercentText(motor.effectiveness)) + "\n" +
                tr("故障概率：%1，置信度：%2").arg(ftcPercentText(motor.faultProbability)).arg(ftcPercentText(motor.confidence)) + "\n" +
-               tr("分类：%1").arg(motor.faultTypeText)
+               tr("不确定度 σ：%1，估计年龄：%2 s").arg(motor.uncertainty >= 0 ? Number(motor.uncertainty).toFixed(3) : "N/A")
+                   .arg(motor.estimateAge >= 0 ? Number(motor.estimateAge).toFixed(2) : "N/A") + "\n" +
+               tr("状态：%1，分类：%2").arg(motor.dataStateText).arg(motor.faultTypeText)
     }
 
     function linkStateText(vehicle) {

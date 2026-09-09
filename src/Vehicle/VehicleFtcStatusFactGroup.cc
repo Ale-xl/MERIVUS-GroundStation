@@ -39,6 +39,9 @@ QHash<int, QByteArray> FtcMotorStatusModel::roleNames() const
         {FailedRole, "failed"},
         {AvailableRole, "available"},
         {SeverityRole, "severity"},
+        {UncertaintyRole, "uncertainty"}, {EstimateAgeRole, "estimateAge"},
+        {DataStateTextRole, "dataStateText"}, {LastEffectivenessRole, "lastEffectiveness"},
+        {EstimateValidRole, "estimateValid"},
     };
 }
 
@@ -72,11 +75,13 @@ void FtcMotorStatusModel::update(const mavlink_merivus_ftc_motor_status_t& messa
 
     for (int i = 0; i < static_cast<int>(_motors.size()); ++i) {
         MotorData& motor = _motors[static_cast<size_t>(i)];
-        motor.available = i < _motorCount
-            && (message.health_pct[i] != UINT8_MAX
-                || message.effectiveness_pct[i] != UINT8_MAX
-                || message.fault_probability_pct[i] != UINT8_MAX
-                || message.confidence_pct[i] != UINT8_MAX);
+        motor.available = i < _motorCount;
+        motor.estimateValid = (message.flags & MERIVUS_FTC_MOTOR_FLAGS_MODEL_VALID) != 0;
+        motor.observable = message.current_observable != 0;
+        motor.estimatorState = message.estimator_state;
+        motor.diagnosisState = message.diagnosis_state[i];
+        motor.uncertainty = qIsFinite(message.estimate_uncertainty[i]) ? message.estimate_uncertainty[i] : -1.0;
+        motor.estimateAge = qIsFinite(message.estimate_age) ? message.estimate_age : -1.0;
         motor.health = _decodePercentage(message.health_pct[i]);
         motor.effectiveness = _decodePercentage(message.effectiveness_pct[i]);
         motor.faultProbability = _decodePercentage(message.fault_probability_pct[i]);
@@ -129,8 +134,8 @@ QVariant FtcMotorStatusModel::_roleValue(const MotorData& motor, int row, int ro
 {
     switch (role) {
     case MotorIndexRole: return row;
-    case HealthRole: return motor.health;
-    case EffectivenessRole: return motor.effectiveness;
+    case HealthRole: return motor.estimateValid && !_stale ? motor.health : -1.0;
+    case EffectivenessRole: return motor.estimateValid && !_stale ? motor.effectiveness : -1.0;
     case FaultProbabilityRole: return motor.faultProbability;
     case ConfidenceRole: return motor.confidence;
     case FaultTypeRole: return motor.faultType;
@@ -138,7 +143,23 @@ QVariant FtcMotorStatusModel::_roleValue(const MotorData& motor, int row, int ro
     case DegradedRole: return motor.degraded;
     case FailedRole: return motor.failed;
     case AvailableRole: return motor.available && !_stale;
-    case SeverityRole: return _stale || !motor.available ? "unavailable" : (motor.failed ? "critical" : (motor.degraded ? "warning" : "normal"));
+    case SeverityRole: return _stale || !motor.available ? "unavailable" : (motor.failed ? "critical" : (motor.degraded || !motor.estimateValid || !motor.observable ? "warning" : "normal"));
+    case UncertaintyRole: return _stale ? -1.0 : motor.uncertainty;
+    case EstimateAgeRole: return _stale ? -1.0 : motor.estimateAge;
+    case LastEffectivenessRole: return motor.effectiveness;
+    case EstimateValidRole: return motor.estimateValid && !_stale;
+    case DataStateTextRole:
+        if (!motor.available) return tr("消息未收到");
+        if (_stale) return tr("消息已过期");
+        if (motor.diagnosisState == 5) return tr("故障");
+        if (motor.diagnosisState == 4) return tr("退化");
+        if (motor.estimatorState == 0) return tr("未初始化");
+        if (motor.estimatorState == 1) return tr("学习中");
+        if (motor.estimatorState == 6) return tr("历史估计过期");
+        if (motor.estimatorState == 7) return tr("模型不可用");
+        if (!motor.observable) return tr("当前不可观测");
+        if (!motor.estimateValid) return tr("估计质量不足");
+        return tr("有效");
     default: return {};
     }
 }
@@ -187,6 +208,11 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
             _systemState = content.system_state;
             _enabled = (content.flags & MERIVUS_FTC_MOTOR_FLAGS_MONITOR_ENABLED) != 0;
             _modelQuality = _decodePercentage(content.model_quality_pct);
+            _modelValid = (content.flags & MERIVUS_FTC_MOTOR_FLAGS_MODEL_VALID) != 0;
+            _baselineLearned = content.baseline_learned != 0;
+            _currentObservable = content.current_observable != 0;
+            _estimatorState = content.estimator_state;
+            _estimateAge = qIsFinite(content.estimate_age) ? content.estimate_age : -1.0;
         }
     } else if (message.msgid == MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS) {
         mavlink_merivus_ftc_control_status_t content{};
@@ -197,6 +223,21 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
             _systemState = content.system_state;
             _controlMode = content.control_mode;
             _authorityState = content.authority_state;
+            _authorityValid = (content.flags & MERIVUS_FTC_CONTROL_FLAGS_AUTHORITY_VALID) != 0;
+            QVariantList positive, negative;
+            for (int axis = 0; axis < 3; ++axis) { positive.append(content.positive_authority[axis]); negative.append(content.negative_authority[axis]); }
+            _details["positiveAuthority"] = positive;
+            _details["negativeAuthority"] = negative;
+            _details["thrustUp"] = content.thrust_up;
+            _details["thrustDown"] = content.thrust_down;
+            _details["reachableResidual"] = content.reachable_residual;
+            _details["allocationFallback"] = content.allocation_fallback;
+            _details["recoveryFallback"] = content.recovery_fallback;
+            _details["arbitrationWeight"] = content.arbitration_weight;
+            _details["reentryWeight"] = content.reentry_weight;
+            _details["allocationActive"] = content.allocation_active;
+            _details["recoveryActive"] = content.recovery_active;
+
             _recoveryState = content.recovery_state;
             _enabled = (content.flags & MERIVUS_FTC_CONTROL_FLAGS_MONITOR_ENABLED) != 0;
             _recoveryCandidate = (content.flags & MERIVUS_FTC_CONTROL_FLAGS_RECOVERY_CANDIDATE_VALID) != 0;
@@ -235,6 +276,16 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
         _markReceived(_diagnosticsReceivedAt, _diagnosticsReceived, _diagnosticsStale, content.protocol_version);
 
         if (_protocolCompatible) {
+            _details["conditionNumber"] = content.condition_number;
+            _details["rigidBodyActivity"] = content.rigid_body_activity;
+            _details["predictionResidual"] = content.model_prediction_residual;
+            _details["updateCount"] = content.update_count;
+            _details["resetCount"] = content.reset_count;
+            _details["mass"] = content.mass;
+            _details["massState"] = content.mass_state;
+            _details["inertiaState"] = content.inertia_state;
+            _details["cgState"] = content.cg_state;
+            _details["estimatorFlags"] = content.estimator_flags;
             _modelResidual = content.model_residual;
             _excitation = content.excitation;
             _maneuverIntensity = content.maneuver_intensity;
@@ -298,15 +349,42 @@ double VehicleFtcStatusFactGroup::_decodePercentage(uint8_t value)
     return value == UINT8_MAX ? -1.0 : static_cast<double>(value) / 2.0;
 }
 
+QString VehicleFtcStatusFactGroup::modelStateText() const
+{
+    if (!motorAvailable()) return tr("消息未收到");
+    if (motorStale()) return tr("消息已过期");
+    switch (_estimatorState) {
+    case 0: return tr("未初始化");
+    case 1: return tr("学习中");
+    case 2: return tr("基线已学习");
+    case 3: return tr("可观测，估计质量不足");
+    case 4: return tr("当前不可观测");
+    case 5: return modelValid() ? tr("有效") : tr("模型不可用");
+    case 6: return tr("历史估计过期");
+    default: return tr("模型不可用");
+    }
+}
+
 QString VehicleFtcStatusFactGroup::systemStateText() const
 {
+    if (!_protocolCompatible) return tr("协议不兼容");
+    if (!available()) return tr("消息未收到");
+    if ((!motorAvailable() || motorStale()) && (!controlAvailable() || controlStale())) return tr("消息已过期");
+    if (_systemState == MERIVUS_FTC_SYSTEM_STATE_NORMAL && !modelValid()) return modelStateText();
     switch (_systemState) {
     case MERIVUS_FTC_SYSTEM_STATE_DISABLED: return tr("关闭");
+    case MERIVUS_FTC_SYSTEM_STATE_INITIALIZING: return tr("初始化中");
+    case MERIVUS_FTC_SYSTEM_STATE_CALIBRATING: return tr("学习中");
+    case MERIVUS_FTC_SYSTEM_STATE_READY: return tr("模型就绪，等待控制裕度");
+    case MERIVUS_FTC_SYSTEM_STATE_UNOBSERVABLE: return tr("当前不可观测");
+    case MERIVUS_FTC_SYSTEM_STATE_SHADOW: return tr("影子分配");
+    case MERIVUS_FTC_SYSTEM_STATE_RECOVERY_CANDIDATE: return tr("恢复候选");
+    case MERIVUS_FTC_SYSTEM_STATE_ACTIVE_ALLOCATION: return tr("主动分配");
     case MERIVUS_FTC_SYSTEM_STATE_NORMAL: return tr("正常");
     case MERIVUS_FTC_SYSTEM_STATE_DEGRADED: return tr("性能下降");
     case MERIVUS_FTC_SYSTEM_STATE_FAULT_CONFIRMED: return tr("故障已确认");
     case MERIVUS_FTC_SYSTEM_STATE_RECOVERY_READY: return tr("恢复候选就绪");
-    case MERIVUS_FTC_SYSTEM_STATE_RECOVERY_ACTIVE: return tr("恢复候选运行中");
+    case MERIVUS_FTC_SYSTEM_STATE_RECOVERY_ACTIVE: return tr("主动恢复");
     case MERIVUS_FTC_SYSTEM_STATE_EMERGENCY_LAND: return tr("紧急降落");
     case MERIVUS_FTC_SYSTEM_STATE_FAILED: return tr("系统失败");
     default: return tr("未知");
@@ -316,7 +394,9 @@ QString VehicleFtcStatusFactGroup::systemStateText() const
 QString VehicleFtcStatusFactGroup::systemSeverity() const
 {
     if ((!motorAvailable() || motorStale()) && (!controlAvailable() || controlStale())) return "unavailable";
-    if (_systemState == MERIVUS_FTC_SYSTEM_STATE_NORMAL) return "normal";
+    if (_systemState == MERIVUS_FTC_SYSTEM_STATE_FAILED || _controlMode == MERIVUS_FTC_CONTROL_MODE_ACTIVE) return "critical";
+    if (!modelValid() || !_currentObservable) return "warning";
+    if (_systemState == MERIVUS_FTC_SYSTEM_STATE_NORMAL || _systemState == MERIVUS_FTC_SYSTEM_STATE_SHADOW) return "normal";
     if (_systemState == MERIVUS_FTC_SYSTEM_STATE_DISABLED) return "unavailable";
     if (_systemState == MERIVUS_FTC_SYSTEM_STATE_DEGRADED || _systemState == MERIVUS_FTC_SYSTEM_STATE_RECOVERY_READY) return "warning";
     return "critical";
@@ -324,6 +404,8 @@ QString VehicleFtcStatusFactGroup::systemSeverity() const
 
 QString VehicleFtcStatusFactGroup::controlModeText() const
 {
+    if (!controlAvailable()) return tr("消息未收到");
+    if (controlStale()) return tr("消息已过期");
     switch (_controlMode) {
     case MERIVUS_FTC_CONTROL_MODE_DISABLED: return tr("DISABLED · 关闭");
     case MERIVUS_FTC_CONTROL_MODE_OBSERVE: return tr("OBSERVE · 只观测");
@@ -337,6 +419,7 @@ QString VehicleFtcStatusFactGroup::controlModeText() const
 QString VehicleFtcStatusFactGroup::controlModeSeverity() const
 {
     if (!controlAvailable() || controlStale()) return "unavailable";
+    if (!controlAvailable() || controlStale()) return "unavailable";
     if (_controlMode == MERIVUS_FTC_CONTROL_MODE_ACTIVE) return "critical";
     if (_controlMode == MERIVUS_FTC_CONTROL_MODE_CANDIDATE) return "warning";
     return _controlMode == MERIVUS_FTC_CONTROL_MODE_DISABLED ? "unavailable" : "normal";
@@ -344,6 +427,9 @@ QString VehicleFtcStatusFactGroup::controlModeSeverity() const
 
 QString VehicleFtcStatusFactGroup::authorityStateText() const
 {
+    if (!controlAvailable()) return tr("消息未收到");
+    if (controlStale()) return tr("消息已过期");
+    if (!_authorityValid) return tr("控制裕度不可用");
     switch (_authorityState) {
     case MERIVUS_FTC_AUTHORITY_STATE_FULL_CONTROL: return tr("控制裕度完整");
     case MERIVUS_FTC_AUTHORITY_STATE_DEGRADED_CONTROL: return tr("控制能力下降");
@@ -359,6 +445,7 @@ QString VehicleFtcStatusFactGroup::authorityStateText() const
 QString VehicleFtcStatusFactGroup::authoritySeverity() const
 {
     if (!controlAvailable() || controlStale()) return "unavailable";
+    if (!_authorityValid) return "warning";
     if (_authorityState == MERIVUS_FTC_AUTHORITY_STATE_FULL_CONTROL) return "normal";
     if (_authorityState <= MERIVUS_FTC_AUTHORITY_STATE_ATTITUDE_DEGRADED) return "warning";
     return "critical";
@@ -403,6 +490,7 @@ QString VehicleFtcStatusFactGroup::recoveryStateText() const
     case MERIVUS_FTC_RECOVERY_STATE_RATE_DAMPING: return tr("角速度抑制");
     case MERIVUS_FTC_RECOVERY_STATE_THRUST_VECTOR_RECOVERY: return tr("推力方向恢复");
     case MERIVUS_FTC_RECOVERY_STATE_ATTITUDE_RECOVERY: return tr("姿态恢复");
+    case MERIVUS_FTC_RECOVERY_STATE_VERTICAL_SPEED_RECOVERY: return tr("垂直速度恢复");
     case MERIVUS_FTC_RECOVERY_STATE_ALTITUDE_STABILIZATION: return tr("高度稳定");
     case MERIVUS_FTC_RECOVERY_STATE_CONTROL_REENTRY: return tr("恢复正常控制");
     case MERIVUS_FTC_RECOVERY_STATE_EMERGENCY_LAND: return tr("紧急降落");
@@ -421,6 +509,6 @@ QString VehicleFtcStatusFactGroup::_severityForRecovery() const
 {
     if ((!controlAvailable() || controlStale()) && (!extremeAvailable() || extremeStale())) return "unavailable";
     if (_recoveryState <= MERIVUS_FTC_RECOVERY_STATE_MONITORING) return "normal";
-    if (_recoveryState == MERIVUS_FTC_RECOVERY_STATE_EMERGENCY_LAND || _recoveryState >= MERIVUS_FTC_RECOVERY_STATE_FAILED) return "critical";
+    if (_recoveryState == MERIVUS_FTC_RECOVERY_STATE_EMERGENCY_LAND || _recoveryState == MERIVUS_FTC_RECOVERY_STATE_FAILED) return "critical";
     return "warning";
 }
