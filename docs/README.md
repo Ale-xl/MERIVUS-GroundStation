@@ -11,4 +11,6 @@
 
 FTC 遥测链路的协议、后端和界面约束见 [FTC 遥测契约](architecture/FTC_TELEMETRY_CONTRACT.md)。现有 AI、硬件和发布文档仍由 [文档索引](INDEX.md) 汇总。
 
+FTC 本轮修复、真实 SITL 停流恢复与验证边界见 [收尾报告](testing/FTC_FULL_VALIDATION_REPORT.md)。
+
 文档中的“已实现”必须能落到源码、配置或可重复检查。“计划”“候选”“推断”会单独标明，不能当成飞行能力承诺。
