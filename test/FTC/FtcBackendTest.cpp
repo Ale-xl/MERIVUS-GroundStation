@@ -101,5 +101,14 @@ private slots:
         }
     }
 };
-QTEST_GUILESS_MAIN(FtcBackendTest)
+int runFtcLiveProbe(int argc, char** argv);
+int main(int argc, char** argv)
+{
+    for (int i = 1; i < argc; ++i) {
+        if (QByteArray(argv[i]) == "--live") return runFtcLiveProbe(argc, argv);
+    }
+    QCoreApplication app(argc, argv);
+    FtcBackendTest test;
+    return QTest::qExec(&test, argc, argv);
+}
 #include "FtcBackendTest.moc"
