@@ -109,7 +109,9 @@ void FtcMotorStatusModel::setStale(bool stale)
     _stale = stale;
 
     if (_motorCount > 0) {
-        emit dataChanged(index(0, 0), index(_motorCount - 1, 0), {AvailableRole, SeverityRole});
+        emit dataChanged(index(0, 0), index(_motorCount - 1, 0),
+                         {AvailableRole, SeverityRole, HealthRole, EffectivenessRole,
+                          UncertaintyRole, EstimateAgeRole, EstimateValidRole, DataStateTextRole});
     }
 }
 
@@ -200,9 +202,9 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
     if (message.msgid == MAVLINK_MSG_ID_MERIVUS_FTC_MOTOR_STATUS) {
         mavlink_merivus_ftc_motor_status_t content{};
         mavlink_msg_merivus_ftc_motor_status_decode(&message, &content);
-        _markReceived(_motorReceivedAt, _motorReceived, _motorStale, content.protocol_version);
+        _markReceived(_motorReceivedAt, _motorReceived, _motorStale, 0, content.protocol_version);
 
-        if (_protocolCompatible) {
+        if (content.protocol_version == ProtocolVersion) {
             _motors.update(content);
             _motorCount = qMin<int>(content.motor_count, 12);
             _systemState = content.system_state;
@@ -217,9 +219,9 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
     } else if (message.msgid == MAVLINK_MSG_ID_MERIVUS_FTC_CONTROL_STATUS) {
         mavlink_merivus_ftc_control_status_t content{};
         mavlink_msg_merivus_ftc_control_status_decode(&message, &content);
-        _markReceived(_controlReceivedAt, _controlReceived, _controlStale, content.protocol_version);
+        _markReceived(_controlReceivedAt, _controlReceived, _controlStale, 1, content.protocol_version);
 
-        if (_protocolCompatible) {
+        if (content.protocol_version == ProtocolVersion) {
             _systemState = content.system_state;
             _controlMode = content.control_mode;
             _authorityState = content.authority_state;
@@ -254,9 +256,9 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
     } else if (message.msgid == MAVLINK_MSG_ID_MERIVUS_FTC_EXTREME_STATUS) {
         mavlink_merivus_ftc_extreme_status_t content{};
         mavlink_msg_merivus_ftc_extreme_status_decode(&message, &content);
-        _markReceived(_extremeReceivedAt, _extremeReceived, _extremeStale, content.protocol_version);
+        _markReceived(_extremeReceivedAt, _extremeReceived, _extremeStale, 2, content.protocol_version);
 
-        if (_protocolCompatible) {
+        if (content.protocol_version == ProtocolVersion) {
             _impactType = content.impact_type;
             _locState = content.loc_state;
             _recoveryState = content.recovery_state;
@@ -273,9 +275,9 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
     } else if (message.msgid == MAVLINK_MSG_ID_MERIVUS_FTC_DIAGNOSTICS) {
         mavlink_merivus_ftc_diagnostics_t content{};
         mavlink_msg_merivus_ftc_diagnostics_decode(&message, &content);
-        _markReceived(_diagnosticsReceivedAt, _diagnosticsReceived, _diagnosticsStale, content.protocol_version);
+        _markReceived(_diagnosticsReceivedAt, _diagnosticsReceived, _diagnosticsStale, 3, content.protocol_version);
 
-        if (_protocolCompatible) {
+        if (content.protocol_version == ProtocolVersion) {
             _details["conditionNumber"] = content.condition_number;
             _details["rigidBodyActivity"] = content.rigid_body_activity;
             _details["predictionResidual"] = content.model_prediction_residual;
@@ -313,14 +315,16 @@ void VehicleFtcStatusFactGroup::handleMessage(Vehicle* /*vehicle*/, mavlink_mess
     emit statusChanged();
 }
 
-void VehicleFtcStatusFactGroup::_markReceived(qint64& receivedAt, bool& received, bool& staleValue, uint8_t version)
+void VehicleFtcStatusFactGroup::_markReceived(qint64& receivedAt, bool& received, bool& staleValue, unsigned stream, uint8_t version)
 {
     receivedAt = QDateTime::currentMSecsSinceEpoch();
     received = true;
     staleValue = false;
     _lastUpdate = QDateTime::currentDateTimeUtc();
     _protocolVersion = version;
-    _protocolCompatible = _protocolCompatible && version == ProtocolVersion;
+    _streamCompatible[stream] = version == ProtocolVersion;
+    _protocolCompatible = true;
+    for (bool compatible : _streamCompatible) { _protocolCompatible &= compatible; }
 }
 
 void VehicleFtcStatusFactGroup::_refreshStale()

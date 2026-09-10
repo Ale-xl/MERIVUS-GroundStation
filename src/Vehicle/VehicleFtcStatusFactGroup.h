@@ -259,7 +259,7 @@ private:
     static constexpr qint64 StaleTimeoutMs = 3000;
 
     static double _decodePercentage(uint8_t value);
-    void _markReceived(qint64& receivedAt, bool& received, bool& stale, uint8_t version);
+    void _markReceived(qint64& receivedAt, bool& received, bool& stale, unsigned stream, uint8_t version);
     QString _severityForRecovery() const;
 
     FtcMotorStatusModel _motors;
@@ -267,6 +267,7 @@ private:
     QDateTime _lastUpdate;
     int _protocolVersion = 0;
     bool _protocolCompatible = true;
+    std::array<bool, 4> _streamCompatible{{true, true, true, true}};
     bool _enabled = false;
     bool _motorReceived = false;
     bool _controlReceived = false;
