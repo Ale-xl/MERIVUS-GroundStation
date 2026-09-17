@@ -36,4 +36,4 @@ DIAGNOSTICS 增加条件数、真实预测残差、rigid_body_activity、更新/
 Firmware：`python3 Tools/merivus/verify_ftc_telemetry.py`。
 GroundStation：`tools/dev/test-ftc-telemetry-contract.ps1` 和 `tools/dev/generate-merivus-mavlink.ps1 -Check`（使用锁定生成器及 Python future 依赖）。
 
-本阶段协议检查、生成一致性和构建提供软件证据；新 v2 消息实际链路、断链恢复和 UI 回放尚未验证。所有 ACTIVE 默认关闭。
+协议检查、生成一致性和构建提供软件证据；实际 VM—Windows 链路已验证解码、3 秒过期与恢复，不能据此宣称绝对零丢包。详情面板最终视觉样式仍需人工复核。所有 ACTIVE 默认关闭。
