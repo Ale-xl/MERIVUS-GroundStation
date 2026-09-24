@@ -36,6 +36,10 @@
 - [AI 问答与指令分离](architecture/AI_QA_INTENT_SEPARATION.md)
 - [AI 模型稳定性](architecture/AI_MODEL_STABILITY.md)
 
+## 设计决策
+
+- [ADR-0001：植保区域覆盖飞行初版方案（待实现与验证）](adr/0001-plant-protection-area-coverage.md)
+
 ## 开发与验证
 
 - [构建与生成入口](development/BUILD.md)
