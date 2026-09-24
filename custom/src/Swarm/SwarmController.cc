@@ -1,10 +1,12 @@
 #include "SwarmController.h"
 
 #include <QPointer>
+#include <QRandomGenerator>
 #include <QSet>
 #include <QTimer>
 #include <QtAlgorithms>
 
+#include <algorithm>
 #include <cmath>
 
 #include "Fact.h"
@@ -25,6 +27,14 @@ const double SwarmController::kDefaultMissionAltitudeMeters = 20.0;
 SwarmController::SwarmController(QObject* parent)
     : QObject(parent)
 {
+    _formationWatchdogTimer.setInterval(500);
+    connect(&_formationWatchdogTimer, &QTimer::timeout, this, &SwarmController::_checkFormationHealth);
+
+    _formationCommandTimer.setSingleShot(true);
+    connect(&_formationCommandTimer, &QTimer::timeout, this, &SwarmController::_handleFormationCommandTimeout);
+
+    _temporaryMissionTimer.setInterval(500);
+    connect(&_temporaryMissionTimer, &QTimer::timeout, this, &SwarmController::_checkTemporaryMissionProgress);
 }
 
 QVariantMap SwarmController::executeGoto(const QVariantList& selectedVehicleIds, const QVariant& targetCoordinate)
@@ -36,7 +46,10 @@ QVariantMap SwarmController::executeGoto(const QVariantList& selectedVehicleIds,
     return _executeGotoInternal(selectedVehicleIds, QList<QGeoCoordinate>() << coordinate, false);
 }
 
-QVariantMap SwarmController::executeQueuedGoto(const QVariantList& selectedVehicleIds, const QVariantList& queuedCoordinates)
+QVariantMap SwarmController::executeQueuedGoto(const QVariantList& selectedVehicleIds,
+                                               const QVariantList& queuedCoordinates,
+                                               const QVariantList& referenceCoordinates,
+                                               bool replaceExisting)
 {
     QList<QGeoCoordinate> coordinates;
     for (const QVariant& value : queuedCoordinates) {
@@ -50,7 +63,16 @@ QVariantMap SwarmController::executeQueuedGoto(const QVariantList& selectedVehic
         return _result(false, tr("No valid queued coordinates."));
     }
 
-    return _executeGotoInternal(selectedVehicleIds, coordinates, true);
+    QList<QGeoCoordinate> references;
+    for (const QVariant& value : referenceCoordinates) {
+        const QGeoCoordinate coordinate = _coordinateFromVariant(value);
+        if (!coordinate.isValid()) {
+            return _result(false, tr("The frozen vehicle geometry contains an invalid coordinate."));
+        }
+        references << coordinate;
+    }
+
+    return _executeGotoInternal(selectedVehicleIds, coordinates, true, references, replaceExisting);
 }
 
 QVariantMap SwarmController::executeTakeoff(const QVariantList& selectedVehicleIds, double altitudeMeters)
@@ -78,6 +100,8 @@ QVariantMap SwarmController::executeTakeoff(const QVariantList& selectedVehicleI
     QSet<int> matchedIds;
     int delayMs = 0;
 
+    // 错峰触发各机的异步预检，避免同一链路瞬时堆积命令；结果中的 dispatchedIds
+    // 仅表示已进入预检/下发流程，最终 ACK 仍由各 Vehicle 独立处理。
     for (Vehicle* vehicle : vehicles) {
         if (!vehicle) {
             continue;
@@ -102,16 +126,16 @@ QVariantMap SwarmController::executeTakeoff(const QVariantList& selectedVehicleI
 
     const bool ok = !dispatchedIds.isEmpty();
     return _result(ok,
-                   ok ? tr("Batch takeoff commands scheduled for the selected vehicles.")
+                   ok ? tr("Batch takeoff checks scheduled for the selected vehicles.")
                       : tr("No selected vehicle met the takeoff requirements."),
                    dispatchedIds,
                    skippedIds);
 }
 
-QVariantMap SwarmController::executeStartMissions(const QVariantList& selectedVehicleIds)
+QVariantMap SwarmController::executeLand(const QVariantList& selectedVehicleIds)
 {
-    if (selectedVehicleIds.count() < 2) {
-        return _result(false, tr("Select at least two vehicles before starting formation missions."));
+    if (selectedVehicleIds.isEmpty()) {
+        return _result(false, tr("Select at least one vehicle before batch landing."));
     }
 
     QSet<int> requestedIds;
@@ -135,12 +159,12 @@ QVariantMap SwarmController::executeStartMissions(const QVariantList& selectedVe
         }
 
         matchedIds.insert(vehicle->id());
-        if (!_vehicleMissionStartReady(vehicle)) {
+        if (!_vehicleLandReady(vehicle)) {
             skippedIds << vehicle->id();
             continue;
         }
 
-        _dispatchStartMission(vehicle, delayMs);
+        _dispatchLand(vehicle, delayMs);
         dispatchedIds << vehicle->id();
         delayMs += 200;
     }
@@ -153,34 +177,200 @@ QVariantMap SwarmController::executeStartMissions(const QVariantList& selectedVe
 
     const bool ok = !dispatchedIds.isEmpty();
     return _result(ok,
-                   ok ? tr("Each selected vehicle was told to start its own onboard mission.")
-                      : tr("No selected vehicle had a ready onboard mission."),
+                   ok ? tr("Batch landing commands scheduled for the selected vehicles.")
+                      : tr("No selected vehicle met the landing requirements."),
                    dispatchedIds,
                    skippedIds);
 }
 
-QVariantMap SwarmController::sendStartCommand()
+QVariantMap SwarmController::executeRTL(const QVariantList& selectedVehicleIds)
 {
-    if (!_legacyForwardingFeatureEnabled()) {
-        return _result(false, tr("Legacy swarm forwarding is disabled by safety containment."));
+    if (selectedVehicleIds.isEmpty()) {
+        return _result(false, tr("Select at least one vehicle before batch return."));
     }
 
-    _legacyForwardingEnabled = true;
-    _ensureLegacyForwardingConnected();
-
-    if (!_sendLegacyStartPacket()) {
-        return _result(false, tr("No vehicle with id 1 has an active primary link."));
+    QSet<int> requestedIds;
+    for (const QVariant& value : selectedVehicleIds) {
+        const int id = value.toInt();
+        if (id <= 0 || requestedIds.contains(id)) {
+            return _result(false, tr("Vehicle selection contains an invalid or duplicate ID."));
+        }
+        requestedIds.insert(id);
     }
 
-    return _result(true, tr("Legacy swarm start command sent."));
+    const QList<Vehicle*> vehicles = _selectedVehicles(selectedVehicleIds);
+    QList<int> dispatchedIds;
+    QList<int> skippedIds;
+    QSet<int> matchedIds;
+    int delayMs = 0;
+
+    for (Vehicle* vehicle : vehicles) {
+        if (!vehicle) {
+            continue;
+        }
+
+        matchedIds.insert(vehicle->id());
+        if (!_vehicleRTLReady(vehicle)) {
+            skippedIds << vehicle->id();
+            continue;
+        }
+
+        _dispatchRTL(vehicle, delayMs);
+        dispatchedIds << vehicle->id();
+        delayMs += 200;
+    }
+
+    for (int id : requestedIds) {
+        if (!matchedIds.contains(id)) {
+            skippedIds << id;
+        }
+    }
+
+    const bool ok = !dispatchedIds.isEmpty();
+    return _result(ok,
+                   ok ? tr("Batch return commands scheduled for the selected vehicles.")
+                      : tr("No selected vehicle met the return requirements."),
+                   dispatchedIds,
+                   skippedIds);
 }
 
-QVariantMap SwarmController::_executeGotoInternal(const QVariantList& selectedVehicleIds, const QList<QGeoCoordinate>& coordinates, bool queued)
+bool SwarmController::hasActiveTemporaryMission(const QVariantList& selectedVehicleIds) const
+{
+    for (const QVariant& value : selectedVehicleIds) {
+        const int id = value.toInt();
+        if (_temporaryMissions.contains(id) || _staleTemporaryMissionIds.contains(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SwarmController::swarmModeEnabled() const
+{
+    return kFormationFeatureEnabled;
+}
+
+bool SwarmController::formationBusy() const
+{
+    return _formationPhase != FormationPhase::Idle && _formationPhase != FormationPhase::Active;
+}
+
+bool SwarmController::temporaryMissionExecutionEnabled() const
+{
+    return kAutoStartMissionFeatureEnabled;
+}
+
+QVariantMap SwarmController::sendStartCommand(const QVariantList& selectedVehicleIds)
+{
+    if (formationBusy() || _formationActive) {
+        return _result(false, tr("A formation transaction is already active. End it before starting another one."));
+    }
+
+    if (selectedVehicleIds.count() != 1
+        && selectedVehicleIds.count() != 2
+        && selectedVehicleIds.count() != kSwarmVehicleCount) {
+        return _result(false, tr("Formation validation supports one, two, or six selected vehicles."));
+    }
+
+    QSet<int> requestedIds;
+    for (const QVariant& value : selectedVehicleIds) {
+        const int id = value.toInt();
+        if (id < 1 || id > kSwarmVehicleCount || requestedIds.contains(id)) {
+            return _result(false, tr("Formation members must use unique system IDs from 1 through 6."));
+        }
+        requestedIds.insert(id);
+    }
+    if (!requestedIds.contains(kSwarmLeaderSystemId)) {
+        return _result(false, tr("Every formation validation session must include leader UAV-1."));
+    }
+    if (selectedVehicleIds.count() == kSwarmVehicleCount) {
+        for (int id = 1; id <= kSwarmVehicleCount; ++id) {
+            if (!requestedIds.contains(id)) {
+                return _result(false, tr("A six-vehicle session must contain UAV-1 through UAV-6 exactly once."));
+            }
+        }
+    }
+
+    QList<int> skippedIds;
+    const QList<Vehicle*> vehicles = _selectedVehicles(selectedVehicleIds);
+    QSet<int> matchedIds;
+    for (Vehicle* vehicle : vehicles) {
+        if (!vehicle) {
+            continue;
+        }
+
+        matchedIds.insert(vehicle->id());
+        if (!_vehicleFormationReady(vehicle)) {
+            skippedIds << vehicle->id();
+        }
+    }
+    for (int id = 1; id <= 6; ++id) {
+        if (!matchedIds.contains(id)) {
+            skippedIds << id;
+        }
+    }
+    if (!skippedIds.isEmpty()) {
+        std::sort(skippedIds.begin(), skippedIds.end());
+        return _result(false, tr("All selected formation members must be connected, disarmed, on the ground, and ready."),
+                       QList<int>(), skippedIds);
+    }
+
+    _formationVehicleIds.clear();
+    for (int id : requestedIds) {
+        _formationVehicleIds.append(id);
+    }
+    std::sort(_formationVehicleIds.begin(), _formationVehicleIds.end());
+    _formationMemberMask = _memberMask(_formationVehicleIds);
+    _formationSessionId = QRandomGenerator::global()->bounded(1U, kMaximumSessionId + 1U);
+
+    // 编队采用 PREPARE -> COMMIT 两阶段事务；任一成员拒绝或超时都会进入 ABORT，
+    // 防止部分飞行器已经跟随而其他成员仍处于普通模式。
+    _formationForwardingEnabled = true;
+    _ensureFormationForwardingConnected();
+    _pendingFormationCommandIds.clear();
+    for (int id : _formationVehicleIds) {
+        _pendingFormationCommandIds.insert(id);
+    }
+    _successfulFormationCommandIds.clear();
+    _setFormationPhase(FormationPhase::Preparing);
+    _setFormationStatus(tr("Preparing %1 formation member(s)…").arg(_formationVehicleIds.count()));
+
+    QList<int> dispatchedIds;
+    QList<int> commandSkippedIds;
+    if (!_sendFormationCommand(MAV_CMD_USER_1, _formationVehicleIds, &dispatchedIds, &commandSkippedIds)) {
+        _beginFormationAbort(tr("One or more PREPARE commands could not be scheduled."));
+        return _result(false, tr("Formation preparation failed to schedule; rollback started."),
+                       dispatchedIds, commandSkippedIds);
+    }
+
+    _reportedLostFollowerIds.clear();
+    _leaderGpsTimer.restart();
+    _formationCommandTimer.start(10000);
+
+    return _result(true, tr("Formation PREPARE started for the selected members."),
+                   dispatchedIds);
+}
+
+QVariantMap SwarmController::endFormationSession()
+{
+    if (!formationBusy() && !_formationActive) {
+        return _result(false, tr("No formation session is active."));
+    }
+
+    const QList<int> members = _formationVehicleIds;
+    _beginFormationAbort(tr("Formation stop requested by the operator."));
+    return _result(true, tr("Formation ABORT started; members are transitioning to Hold."), members);
+}
+
+QVariantMap SwarmController::_executeGotoInternal(const QVariantList& selectedVehicleIds,
+                                                   const QList<QGeoCoordinate>& coordinates,
+                                                   bool queued,
+                                                   const QList<QGeoCoordinate>& referenceCoordinates,
+                                                   bool replaceExisting)
 {
     if (coordinates.isEmpty()) {
         return _result(false, tr("No target coordinate."));
     }
-
     const QGeoCoordinate finalTarget = coordinates.last();
     QList<Vehicle*> vehicles = _selectedVehicles(selectedVehicleIds);
     if (vehicles.isEmpty()) {
@@ -189,15 +379,44 @@ QVariantMap SwarmController::_executeGotoInternal(const QVariantList& selectedVe
 
     QList<int> dispatchedIds;
     QList<int> skippedIds;
+    QHash<int, QGeoCoordinate> frozenCoordinates;
 
     if (!selectedVehicleIds.isEmpty()) {
         QSet<int> uniqueIds;
-        for (const QVariant& value : selectedVehicleIds) {
+        for (int i = 0; i < selectedVehicleIds.count(); ++i) {
+            const QVariant& value = selectedVehicleIds[i];
             const int id = value.toInt();
-            if (uniqueIds.contains(id)) {
-                return _result(false, tr("Duplicate vehicle IDs in selection."));
+            if (id <= 0 || uniqueIds.contains(id)) {
+                return _result(false, tr("Invalid or duplicate vehicle IDs in selection."));
             }
             uniqueIds.insert(id);
+            if (queued) {
+                if (referenceCoordinates.count() != selectedVehicleIds.count()) {
+                    return _result(false, tr("The frozen target geometry does not match the selected vehicle set."));
+                }
+                frozenCoordinates.insert(id, referenceCoordinates[i]);
+            }
+        }
+    }
+
+    if (queued && hasActiveTemporaryMission(selectedVehicleIds) && !replaceExisting) {
+        QVariantMap result = _result(false, tr("One or more target vehicles already have an active or uncleared temporary mission."));
+        result.insert(QStringLiteral("replacementRequired"), true);
+        return result;
+    }
+
+    if (!selectedVehicleIds.isEmpty()) {
+        QSet<int> matchedIds;
+        for (Vehicle* vehicle : vehicles) {
+            if (vehicle) {
+                matchedIds.insert(vehicle->id());
+            }
+        }
+        for (const QVariant& value : selectedVehicleIds) {
+            const int id = value.toInt();
+            if (!matchedIds.contains(id)) {
+                skippedIds << id;
+            }
         }
     }
 
@@ -213,28 +432,35 @@ QVariantMap SwarmController::_executeGotoInternal(const QVariantList& selectedVe
                 skippedIds << vehicle->id();
                 return _result(false, tr("Vehicle mission upload is already in progress."), dispatchedIds, skippedIds);
             }
-            _dispatchTemporaryMission(vehicle, coordinates, 0);
+            _dispatchTemporaryMission(vehicle, coordinates, 0, replaceExisting);
             dispatchedIds << vehicle->id();
             return _result(true, tr("Temporary mission route upload started."), dispatchedIds, skippedIds);
         }
 
+        _cancelTemporaryMissionForGoto(vehicle);
         _dispatchGoto(vehicle, finalTarget, 0);
         dispatchedIds << vehicle->id();
         return _result(true, tr("Goto command dispatched."), dispatchedIds, skippedIds);
     }
 
+    // 多机目标由确认时冻结的参考坐标计算。确认后即使焦点或选择发生变化，
+    // 也不能悄悄改变本次命令的目标集合和相对队形。
     double centerLat = 0.0;
     double centerLon = 0.0;
     int validCount = 0;
     for (Vehicle* vehicle : vehicles) {
-        if (vehicle && vehicle->coordinate().isValid()) {
-            centerLat += vehicle->coordinate().latitude();
-            centerLon += vehicle->coordinate().longitude();
+        if (!vehicle) {
+            continue;
+        }
+        const QGeoCoordinate reference = queued ? frozenCoordinates.value(vehicle->id()) : vehicle->coordinate();
+        if (reference.isValid()) {
+            centerLat += reference.latitude();
+            centerLon += reference.longitude();
             ++validCount;
         }
     }
 
-    if (validCount == 0) {
+    if (validCount != vehicles.count()) {
         return _result(false, tr("Selected vehicles do not have valid positions."));
     }
 
@@ -254,19 +480,21 @@ QVariantMap SwarmController::_executeGotoInternal(const QVariantList& selectedVe
                 skippedIds << vehicle->id();
                 continue;
             }
+            const QGeoCoordinate reference = frozenCoordinates.value(vehicle->id());
             QList<QGeoCoordinate> vehicleRoute;
             for (const QGeoCoordinate& coordinate : coordinates) {
                 const double moveDistance = centroid.distanceTo(coordinate);
                 const double moveAzimuth = centroid.azimuthTo(coordinate);
-                QGeoCoordinate vehicleCoordinate = vehicle->coordinate().atDistanceAndAzimuth(moveDistance, moveAzimuth);
+                QGeoCoordinate vehicleCoordinate = reference.atDistanceAndAzimuth(moveDistance, moveAzimuth);
                 vehicleCoordinate.setAltitude(coordinate.altitude());
                 vehicleRoute << vehicleCoordinate;
             }
-            _dispatchTemporaryMission(vehicle, vehicleRoute, delayMs);
+            _dispatchTemporaryMission(vehicle, vehicleRoute, delayMs, replaceExisting);
         } else {
             const double moveDistance = centroid.distanceTo(finalTarget);
             const double moveAzimuth = centroid.azimuthTo(finalTarget);
             const QGeoCoordinate vehicleTarget = vehicle->coordinate().atDistanceAndAzimuth(moveDistance, moveAzimuth);
+            _cancelTemporaryMissionForGoto(vehicle);
             _dispatchGoto(vehicle, vehicleTarget, delayMs);
         }
 
@@ -365,25 +593,50 @@ bool SwarmController::_vehicleTakeoffReady(Vehicle* vehicle, double altitudeMete
         return false;
     }
 
-    HealthAndArmingCheckReport* report = vehicle->healthAndArmingCheckReport();
-    return !report || !report->supported() || report->canTakeoff();
+    return true;
 }
 
-bool SwarmController::_vehicleMissionStartReady(Vehicle* vehicle) const
+bool SwarmController::_vehicleLandReady(Vehicle* vehicle) const
+{
+    return vehicle
+        && vehicle->isInitialConnectComplete()
+        && vehicle->vehicleLinkManager()
+        && !vehicle->vehicleLinkManager()->communicationLost()
+        && vehicle->guidedModeSupported()
+        && vehicle->armed()
+        && vehicle->flying()
+        && !vehicle->fixedWing()
+        && vehicle->flightMode() != vehicle->landFlightMode();
+}
+
+bool SwarmController::_vehicleRTLReady(Vehicle* vehicle) const
+{
+    return vehicle
+        && vehicle->isInitialConnectComplete()
+        && vehicle->vehicleLinkManager()
+        && !vehicle->vehicleLinkManager()->communicationLost()
+        && vehicle->guidedModeSupported()
+        && vehicle->armed()
+        && vehicle->flying()
+        && vehicle->flightMode() != vehicle->rtlFlightMode()
+        && vehicle->flightMode() != vehicle->smartRTLFlightMode();
+}
+
+bool SwarmController::_vehicleFormationReady(Vehicle* vehicle) const
 {
     if (!vehicle
         || !vehicle->isInitialConnectComplete()
         || !vehicle->vehicleLinkManager()
         || vehicle->vehicleLinkManager()->communicationLost()
-        || !vehicle->missionManager()
-        || vehicle->missionManager()->inProgress()
-        || vehicle->missionManager()->missionItems().isEmpty()
-        || vehicle->flightMode() == vehicle->missionFlightMode()) {
+        || !vehicle->px4Firmware()
+        || !vehicle->coordinate().isValid()
+        || vehicle->armed()
+        || vehicle->flying()) {
         return false;
     }
 
     HealthAndArmingCheckReport* report = vehicle->healthAndArmingCheckReport();
-    return !report || !report->supported() || report->canStartMission();
+    return !report || !report->supported() || report->canTakeoff();
 }
 
 void SwarmController::_dispatchGoto(Vehicle* vehicle, const QGeoCoordinate& coordinate, int delayMs)
@@ -417,24 +670,45 @@ void SwarmController::_dispatchTakeoff(Vehicle* vehicle, double altitudeMeters, 
     });
 }
 
-void SwarmController::_dispatchStartMission(Vehicle* vehicle, int delayMs)
+void SwarmController::_dispatchLand(Vehicle* vehicle, int delayMs)
 {
     QPointer<Vehicle> guardedVehicle(vehicle);
     QTimer::singleShot(delayMs, this, [this, guardedVehicle]() {
-        if (guardedVehicle && _vehicleMissionStartReady(guardedVehicle)) {
-            guardedVehicle->startMission();
+        if (guardedVehicle && _vehicleLandReady(guardedVehicle)) {
+            guardedVehicle->guidedModeLand();
         }
     });
 }
 
-
-
-void SwarmController::_dispatchTemporaryMission(Vehicle* vehicle, const QList<QGeoCoordinate>& coordinates, int delayMs)
+void SwarmController::_dispatchRTL(Vehicle* vehicle, int delayMs)
 {
     QPointer<Vehicle> guardedVehicle(vehicle);
-    QTimer::singleShot(delayMs, this, [this, guardedVehicle, coordinates]() {
-        if (!guardedVehicle || !guardedVehicle->missionManager() || guardedVehicle->missionManager()->inProgress()) {
+    QTimer::singleShot(delayMs, this, [this, guardedVehicle]() {
+        if (guardedVehicle && _vehicleRTLReady(guardedVehicle)) {
+            guardedVehicle->guidedModeRTL(false);
+        }
+    });
+}
+
+void SwarmController::_dispatchTemporaryMission(Vehicle* vehicle,
+                                                const QList<QGeoCoordinate>& coordinates,
+                                                int delayMs,
+                                                bool replaceExisting)
+{
+    // 临时路线通过 MissionManager 上传并在完成后清理；不得把上传回调当作航线完成。
+    QPointer<Vehicle> guardedVehicle(vehicle);
+    QTimer::singleShot(delayMs, this, [this, guardedVehicle, coordinates, replaceExisting]() {
+        if (!guardedVehicle || !guardedVehicle->missionManager()) {
             return;
+        }
+
+        MissionManager* missionManager = guardedVehicle->missionManager();
+        if (missionManager->inProgress()) {
+            return;
+        }
+
+        if (replaceExisting && (_temporaryMissions.contains(guardedVehicle->id()) || _staleTemporaryMissionIds.contains(guardedVehicle->id()))) {
+            guardedVehicle->pauseVehicle();
         }
 
         QList<MissionItem*> missionItems = _buildTemporaryMissionItems(guardedVehicle, coordinates);
@@ -443,19 +717,178 @@ void SwarmController::_dispatchTemporaryMission(Vehicle* vehicle, const QList<QG
             return;
         }
 
-        MissionManager* missionManager = guardedVehicle->missionManager();
-        QPointer<MissionManager> guardedMissionManager(missionManager);
-        connect(missionManager, &MissionManager::sendComplete, this, [this, guardedVehicle, guardedMissionManager](bool error) {
-            if (guardedMissionManager) {
-                disconnect(guardedMissionManager.data(), nullptr, this, nullptr);
-            }
-            if (!error && guardedVehicle && guardedMissionManager && _autoStartMissionFeatureEnabled()) {
-                guardedVehicle->startMission();
-            }
-        });
+        _ensureTemporaryMissionConnections(guardedVehicle);
+
+        TemporaryMissionState state;
+        state.vehicle = guardedVehicle;
+        state.finalCoordinate = coordinates.last();
+        state.expectedMissionItemCount = coordinates.count();
+        state.stage = TemporaryMissionStage::Uploading;
+        _temporaryMissions.insert(guardedVehicle->id(), state);
+        _staleTemporaryMissionIds.remove(guardedVehicle->id());
+        _temporaryMissionTimer.start();
 
         missionManager->writeMissionItems(missionItems);
     });
+}
+
+void SwarmController::_ensureTemporaryMissionConnections(Vehicle* vehicle)
+{
+    if (!vehicle || !vehicle->missionManager() || _temporaryMissionConnections.contains(vehicle->id())) {
+        return;
+    }
+
+    _temporaryMissionConnections.insert(vehicle->id());
+    const int vehicleId = vehicle->id();
+    QPointer<Vehicle> guardedVehicle(vehicle);
+    MissionManager* missionManager = vehicle->missionManager();
+    connect(missionManager, &MissionManager::sendComplete, this, [this, guardedVehicle](bool error) {
+        if (guardedVehicle) {
+            _handleTemporaryMissionSendComplete(guardedVehicle, error);
+        }
+    });
+    connect(missionManager, &MissionManager::removeAllComplete, this, [this, guardedVehicle](bool error) {
+        if (guardedVehicle) {
+            _handleTemporaryMissionRemoveAllComplete(guardedVehicle, error);
+        }
+    });
+    connect(vehicle, &QObject::destroyed, this, [this, vehicleId]() {
+        _temporaryMissions.remove(vehicleId);
+        _temporaryMissionConnections.remove(vehicleId);
+        _staleTemporaryMissionIds.remove(vehicleId);
+        if (_temporaryMissions.isEmpty()) {
+            _temporaryMissionTimer.stop();
+        }
+    });
+}
+
+void SwarmController::_handleTemporaryMissionSendComplete(Vehicle* vehicle, bool error)
+{
+    if (!vehicle || !_temporaryMissions.contains(vehicle->id())) {
+        return;
+    }
+
+    TemporaryMissionState& state = _temporaryMissions[vehicle->id()];
+    if (state.stage == TemporaryMissionStage::Clearing) {
+        if (!vehicle->missionManager()->inProgress()) {
+            vehicle->missionManager()->removeAll();
+        }
+        return;
+    }
+    if (state.stage != TemporaryMissionStage::Uploading) {
+        return;
+    }
+
+    if (error) {
+        _staleTemporaryMissionIds.insert(vehicle->id());
+        _temporaryMissions.remove(vehicle->id());
+        if (_temporaryMissions.isEmpty()) {
+            _temporaryMissionTimer.stop();
+        }
+        emit temporaryMissionCompleted(vehicle->id(), true);
+        return;
+    }
+
+    const int onboardCount = vehicle->missionManager()->missionItems().count();
+    state.finalMissionIndex = qMax(0, (onboardCount > 0 ? onboardCount : state.expectedMissionItemCount) - 1);
+    state.stage = TemporaryMissionStage::Executing;
+    vehicle->startMission();
+}
+
+void SwarmController::_handleTemporaryMissionRemoveAllComplete(Vehicle* vehicle, bool error)
+{
+    if (!vehicle) {
+        return;
+    }
+
+    const int id = vehicle->id();
+    if (!_temporaryMissions.contains(id) && !_staleTemporaryMissionIds.contains(id)) {
+        return;
+    }
+    _temporaryMissions.remove(id);
+    if (error) {
+        _staleTemporaryMissionIds.insert(id);
+    } else {
+        _staleTemporaryMissionIds.remove(id);
+    }
+    if (_temporaryMissions.isEmpty()) {
+        _temporaryMissionTimer.stop();
+    }
+    emit temporaryMissionCompleted(id, error);
+}
+
+void SwarmController::_cancelTemporaryMissionForGoto(Vehicle* vehicle)
+{
+    if (!vehicle || !vehicle->missionManager()
+        || (!_temporaryMissions.contains(vehicle->id()) && !_staleTemporaryMissionIds.contains(vehicle->id()))) {
+        return;
+    }
+
+    _ensureTemporaryMissionConnections(vehicle);
+    if (!_temporaryMissions.contains(vehicle->id())) {
+        TemporaryMissionState state;
+        state.vehicle = vehicle;
+        state.stage = TemporaryMissionStage::Clearing;
+        _temporaryMissions.insert(vehicle->id(), state);
+    } else {
+        _temporaryMissions[vehicle->id()].stage = TemporaryMissionStage::Clearing;
+    }
+    _staleTemporaryMissionIds.insert(vehicle->id());
+    vehicle->pauseVehicle();
+    _requestTemporaryMissionClear(vehicle);
+}
+
+void SwarmController::_requestTemporaryMissionClear(Vehicle* vehicle)
+{
+    if (!vehicle || !vehicle->missionManager()) {
+        return;
+    }
+    if (!vehicle->missionManager()->inProgress()) {
+        vehicle->missionManager()->removeAll();
+    }
+}
+
+void SwarmController::_checkTemporaryMissionProgress()
+{
+    const QList<int> ids = _temporaryMissions.keys();
+    for (int id : ids) {
+        if (!_temporaryMissions.contains(id)) {
+            continue;
+        }
+
+        TemporaryMissionState& state = _temporaryMissions[id];
+        Vehicle* vehicle = state.vehicle;
+        if (!vehicle || !vehicle->missionManager()) {
+            _temporaryMissions.remove(id);
+            continue;
+        }
+        if (state.stage == TemporaryMissionStage::Clearing) {
+            _requestTemporaryMissionClear(vehicle);
+            continue;
+        }
+        if (state.stage != TemporaryMissionStage::Executing
+            || vehicle->missionManager()->currentIndex() < state.finalMissionIndex
+            || !vehicle->coordinate().isValid()
+            || !state.finalCoordinate.isValid()
+            || vehicle->coordinate().distanceTo(state.finalCoordinate) > 2.0) {
+            continue;
+        }
+
+        bool speedOk = false;
+        const double groundSpeed = vehicle->groundSpeed()->rawValue().toDouble(&speedOk);
+        if (!speedOk || !std::isfinite(groundSpeed) || groundSpeed > 0.8) {
+            continue;
+        }
+
+        state.stage = TemporaryMissionStage::Clearing;
+        vehicle->pauseVehicle();
+        QPointer<Vehicle> guardedVehicle(vehicle);
+        QTimer::singleShot(500, this, [this, guardedVehicle]() {
+            if (guardedVehicle) {
+                _requestTemporaryMissionClear(guardedVehicle);
+            }
+        });
+    }
 }
 
 QList<MissionItem*> SwarmController::_buildTemporaryMissionItems(Vehicle* vehicle, const QList<QGeoCoordinate>& coordinates) const
@@ -517,83 +950,375 @@ double SwarmController::_relativeAltitudeMeters(Vehicle* vehicle, double fallbac
     return ok && std::isfinite(altitude) ? altitude : fallbackMeters;
 }
 
-bool SwarmController::_legacyForwardingFeatureEnabled() const
+void SwarmController::_ensureFormationForwardingConnected()
 {
-    return qEnvironmentVariableIntValue("MERIVUS_DEV_ENABLE_SWARM_LEGACY_FORWARDING") == 1;
-}
-
-bool SwarmController::_autoStartMissionFeatureEnabled() const
-{
-    return qEnvironmentVariableIntValue("MERIVUS_DEV_ENABLE_SWARM_AUTO_START_MISSION") == 1;
-}
-
-void SwarmController::_ensureLegacyForwardingConnected()
-{
-    if (!_legacyForwardingFeatureEnabled()) {
-        return;
-    }
-
-    if (_legacyForwardingConnected) {
+    if (_formationForwardingConnected) {
         return;
     }
 
     MAVLinkProtocol* mavlinkProtocol = qgcApp()->toolbox()->mavlinkProtocol();
     if (mavlinkProtocol) {
         connect(mavlinkProtocol, &MAVLinkProtocol::messageReceived, this, &SwarmController::_receiveMessage);
-        _legacyForwardingConnected = true;
+        _formationForwardingConnected = true;
     }
 }
 
-bool SwarmController::_sendLegacyStartPacket()
+void SwarmController::_ensureFormationCommandConnection(Vehicle* vehicle)
 {
-    if (!_legacyForwardingFeatureEnabled()) {
-        return false;
+    if (!vehicle) {
+        return;
     }
 
+    connect(vehicle, &Vehicle::mavCommandResult,
+            this, &SwarmController::_handleFormationCommandResult,
+            Qt::UniqueConnection);
+}
+
+bool SwarmController::_sendFormationCommand(MAV_CMD command,
+                                             const QList<int>& vehicleIds,
+                                             QList<int>* dispatchedIds,
+                                             QList<int>* skippedIds)
+{
+    // sessionId 与成员掩码随每条协议命令发送，用于拒绝陈旧 ACK 和跨会话串扰。
     MultiVehicleManager* manager = qgcApp()->toolbox()->multiVehicleManager();
     if (!manager || !manager->vehicles()) {
         return false;
+    }
+
+    bool allScheduled = true;
+    for (int vehicleId : vehicleIds) {
+        Vehicle* vehicle = manager->getVehicleById(vehicleId);
+        bool linkAvailable = false;
+
+        if (vehicle && vehicle->vehicleLinkManager()
+            && !vehicle->vehicleLinkManager()->communicationLost()) {
+            const WeakLinkInterfacePtr weakLink = vehicle->vehicleLinkManager()->primaryLink();
+            linkAvailable = !weakLink.expired() && static_cast<bool>(weakLink.lock());
+        }
+
+        if (!linkAvailable) {
+            allScheduled = false;
+            if (skippedIds) {
+                skippedIds->append(vehicleId);
+            }
+            continue;
+        }
+
+        _ensureFormationCommandConnection(vehicle);
+        vehicle->sendMavCommand(vehicle->defaultComponentId(), command, true,
+                                kSwarmProtocolVersion,
+                                _formationMemberMask,
+                                kSwarmLeaderSystemId,
+                                _formationSessionId);
+        if (dispatchedIds) {
+            dispatchedIds->append(vehicleId);
+        }
+    }
+
+    return allScheduled;
+}
+
+void SwarmController::_beginFormationCommit()
+{
+    _pendingFormationCommandIds.clear();
+    _successfulFormationCommandIds.clear();
+    for (int id : _formationVehicleIds) {
+        _pendingFormationCommandIds.insert(id);
+    }
+    _setFormationPhase(FormationPhase::Committing);
+    _setFormationStatus(tr("Selected members are entering Offboard, arming, and taking off…"));
+
+    QList<int> dispatchedIds;
+    QList<int> skippedIds;
+    if (!_sendFormationCommand(MAV_CMD_USER_2, _formationVehicleIds, &dispatchedIds, &skippedIds)) {
+        _beginFormationAbort(tr("One or more COMMIT commands could not be scheduled."));
+        return;
+    }
+
+    _formationCommandTimer.start(70000);
+}
+
+void SwarmController::_beginFormationRelease()
+{
+    _pendingFormationCommandIds.clear();
+    _successfulFormationCommandIds.clear();
+    for (int id : _formationVehicleIds) {
+        _pendingFormationCommandIds.insert(id);
+    }
+    _setFormationPhase(FormationPhase::Releasing);
+    _setFormationStatus(tr("All members are ready; releasing the formation trajectory…"));
+
+    QList<int> dispatchedIds;
+    QList<int> skippedIds;
+    if (!_sendFormationCommand(MAV_CMD_USER_3, _formationVehicleIds, &dispatchedIds, &skippedIds)) {
+        _beginFormationAbort(tr("One or more RELEASE commands could not be scheduled."));
+        return;
+    }
+
+    _formationCommandTimer.start(10000);
+}
+
+void SwarmController::_beginFormationAbort(const QString& reason)
+{
+    if (_formationVehicleIds.isEmpty()) {
+        _finishFormationIdle(reason);
+        return;
+    }
+
+    _formationCommandTimer.stop();
+    _formationWatchdogTimer.stop();
+    _formationForwardingEnabled = false;
+    _setFormationActive(false);
+    _setFormationPhase(FormationPhase::Aborting);
+    _setFormationStatus(reason + tr(" Rolling back all selected members to Hold…"));
+    emit formationFault(reason);
+
+    _pauseFormationFollowers();
+
+    QList<int> dispatchedIds;
+    QList<int> skippedIds;
+    _sendFormationCommand(MAV_CMD_USER_4, _formationVehicleIds, &dispatchedIds, &skippedIds);
+
+    _pendingFormationCommandIds.clear();
+    _successfulFormationCommandIds.clear();
+    for (int id : dispatchedIds) {
+        _pendingFormationCommandIds.insert(id);
+    }
+
+    if (_pendingFormationCommandIds.isEmpty()) {
+        _finishFormationIdle(tr("Formation rollback finished locally; no onboard ABORT acknowledgement was available."));
+    } else {
+        _formationCommandTimer.start(30000);
+    }
+}
+
+void SwarmController::_finishFormationIdle(const QString& status)
+{
+    _formationCommandTimer.stop();
+    _formationWatchdogTimer.stop();
+    _formationForwardingEnabled = false;
+    _pendingFormationCommandIds.clear();
+    _successfulFormationCommandIds.clear();
+    _reportedLostFollowerIds.clear();
+    _formationVehicleIds.clear();
+    _formationMemberMask = 0;
+    _formationSessionId = 0;
+    _setFormationActive(false);
+    _setFormationPhase(FormationPhase::Idle);
+    _setFormationStatus(status);
+}
+
+void SwarmController::_setFormationPhase(FormationPhase phase)
+{
+    if (_formationPhase == phase) {
+        return;
+    }
+
+    const bool wasBusy = formationBusy();
+    _formationPhase = phase;
+    if (wasBusy != formationBusy()) {
+        emit formationBusyChanged();
+    }
+}
+
+void SwarmController::_setFormationStatus(const QString& status)
+{
+    if (_formationStatus == status) {
+        return;
+    }
+    _formationStatus = status;
+    emit formationStatusChanged();
+}
+
+quint8 SwarmController::_memberMask(const QList<int>& vehicleIds) const
+{
+    quint8 mask = 0;
+    for (int id : vehicleIds) {
+        if (id >= 1 && id <= kSwarmVehicleCount) {
+            mask |= static_cast<quint8>(1U << (id - 1));
+        }
+    }
+    return mask;
+}
+
+void SwarmController::_setFormationActive(bool active)
+{
+    if (_formationActive == active) {
+        return;
+    }
+    _formationActive = active;
+    emit formationActiveChanged();
+}
+
+void SwarmController::_pauseFormationFollowers()
+{
+    MultiVehicleManager* manager = qgcApp()->toolbox()->multiVehicleManager();
+    if (!manager || !manager->vehicles()) {
+        return;
     }
 
     QmlObjectListModel* model = manager->vehicles();
     const int count = model->objectList()->count();
     for (int i = 0; i < count; ++i) {
         Vehicle* vehicle = qobject_cast<Vehicle*>(model->get(i));
-        if (!vehicle || vehicle->id() != 1) {
+        if (!vehicle || !_formationVehicleIds.contains(vehicle->id())
+            || !vehicle->vehicleLinkManager() || vehicle->vehicleLinkManager()->communicationLost()) {
             continue;
         }
-
-        WeakLinkInterfacePtr weakLink = vehicle->vehicleLinkManager()->primaryLink();
-        if (weakLink.expired()) {
-            return false;
-        }
-
-        SharedLinkInterfacePtr sharedLink = weakLink.lock();
-        if (!sharedLink) {
-            return false;
-        }
-
-        mavlink_message_t msg;
-        mavlink_msg_gps_raw_int_pack_chan(55, 55, sharedLink->mavlinkChannel(), &msg,
-                                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        vehicle->sendMessageOnLinkThreadSafe(sharedLink.get(), msg);
-        return true;
+        vehicle->pauseVehicle();
     }
-
-    return false;
 }
 
-void SwarmController::_receiveMessage(LinkInterface*, mavlink_message_t message)
+void SwarmController::_handleFormationCommandResult(int vehicleId,
+                                                     int targetComponent,
+                                                     int command,
+                                                     int ackResult,
+                                                     int failureCode)
 {
-    if (!_legacyForwardingFeatureEnabled() || !_legacyForwardingEnabled || message.msgid != MAVLINK_MSG_ID_GPS_RAW_INT || message.sysid != 1) {
+    Q_UNUSED(targetComponent)
+    Q_UNUSED(failureCode)
+
+    int expectedCommand = -1;
+    switch (_formationPhase) {
+    case FormationPhase::Preparing:
+        expectedCommand = MAV_CMD_USER_1;
+        break;
+    case FormationPhase::Committing:
+        expectedCommand = MAV_CMD_USER_2;
+        break;
+    case FormationPhase::Releasing:
+        expectedCommand = MAV_CMD_USER_3;
+        break;
+    case FormationPhase::Aborting:
+        expectedCommand = MAV_CMD_USER_4;
+        break;
+    default:
+        return;
+    }
+
+    if (command != expectedCommand || !_pendingFormationCommandIds.contains(vehicleId)) {
+        return;
+    }
+
+    _pendingFormationCommandIds.remove(vehicleId);
+    if (ackResult == MAV_RESULT_ACCEPTED) {
+        _successfulFormationCommandIds.insert(vehicleId);
+    } else if (_formationPhase != FormationPhase::Aborting) {
+        _beginFormationAbort(tr("UAV-%1 rejected formation phase %2 (MAV_RESULT %3).")
+                                 .arg(vehicleId)
+                                 .arg(command)
+                                 .arg(ackResult));
+        return;
+    }
+
+    if (!_pendingFormationCommandIds.isEmpty()) {
+        _setFormationStatus(tr("Formation phase %1: %2/%3 members acknowledged.")
+                                .arg(command)
+                                .arg(_successfulFormationCommandIds.count())
+                                .arg(_formationVehicleIds.count()));
+        return;
+    }
+
+    _formationCommandTimer.stop();
+    switch (_formationPhase) {
+    case FormationPhase::Preparing:
+        _beginFormationCommit();
+        break;
+    case FormationPhase::Committing:
+        _beginFormationRelease();
+        break;
+    case FormationPhase::Releasing:
+        _setFormationPhase(FormationPhase::Active);
+        _setFormationActive(true);
+        _setFormationStatus(tr("Formation active: all %1 members reached Control.").arg(_formationVehicleIds.count()));
+        _formationWatchdogTimer.start();
+        break;
+    case FormationPhase::Aborting:
+        _finishFormationIdle(tr("Formation stopped; acknowledged members entered Hold."));
+        break;
+    default:
+        break;
+    }
+}
+
+void SwarmController::_handleFormationCommandTimeout()
+{
+    if (_formationPhase == FormationPhase::Aborting) {
+        _finishFormationIdle(tr("Formation rollback timed out; verify every aircraft is in Hold."));
+        emit formationFault(tr("One or more aircraft did not acknowledge ABORT before timeout."));
+        return;
+    }
+
+    _beginFormationAbort(tr("Formation phase timed out before every member acknowledged."));
+}
+
+void SwarmController::_checkFormationHealth()
+{
+    if (!_formationActive) {
+        _formationWatchdogTimer.stop();
+        return;
+    }
+
+    MultiVehicleManager* manager = qgcApp()->toolbox()->multiVehicleManager();
+    Vehicle* leader = manager ? manager->getVehicleById(1) : nullptr;
+    const bool leaderLost = !leader
+        || !leader->vehicleLinkManager()
+        || leader->vehicleLinkManager()->communicationLost()
+        || (_leaderGpsTimer.isValid() && _leaderGpsTimer.elapsed() > 3000);
+    if (leaderLost) {
+        _beginFormationAbort(tr("UAV-1 telemetry timed out."));
+        return;
+    }
+
+    for (int id : _formationVehicleIds) {
+        if (id == kSwarmLeaderSystemId) {
+            continue;
+        }
+        Vehicle* follower = manager ? manager->getVehicleById(id) : nullptr;
+        const bool lost = !follower
+            || !follower->vehicleLinkManager()
+            || follower->vehicleLinkManager()->communicationLost();
+        if (lost && !_reportedLostFollowerIds.contains(id)) {
+            _reportedLostFollowerIds.insert(id);
+            _beginFormationAbort(tr("UAV-%1 disconnected during formation.").arg(id));
+            return;
+        } else if (!lost) {
+            _reportedLostFollowerIds.remove(id);
+        }
+    }
+}
+
+void SwarmController::_receiveMessage(LinkInterface* link, mavlink_message_t message)
+{
+    if (!_formationForwardingEnabled || message.msgid != MAVLINK_MSG_ID_GPS_RAW_INT || message.sysid != 1) {
+        return;
+    }
+
+    MultiVehicleManager* manager = qgcApp()->toolbox()->multiVehicleManager();
+    Vehicle* leader = manager ? manager->getVehicleById(kSwarmLeaderSystemId) : nullptr;
+    if (!leader || !leader->vehicleLinkManager()) {
+        return;
+    }
+
+    const WeakLinkInterfacePtr leaderWeakLink = leader->vehicleLinkManager()->primaryLink();
+    const SharedLinkInterfacePtr leaderLink = leaderWeakLink.lock();
+    if (!leaderLink || leaderLink.get() != link) {
         return;
     }
 
     mavlink_gps_raw_int_t gpsRaw;
     mavlink_msg_gps_raw_int_decode(&message, &gpsRaw);
+    if (gpsRaw.fix_type < GPS_FIX_TYPE_3D_FIX || (gpsRaw.lat == 0 && gpsRaw.lon == 0)) {
+        return;
+    }
+    _leaderGpsTimer.restart();
 
-    MultiVehicleManager* manager = qgcApp()->toolbox()->multiVehicleManager();
     if (!manager || !manager->vehicles()) {
+        return;
+    }
+
+    MAVLinkProtocol* mavlinkProtocol = qgcApp()->toolbox()->mavlinkProtocol();
+    if (!mavlinkProtocol) {
         return;
     }
 
@@ -601,7 +1326,9 @@ void SwarmController::_receiveMessage(LinkInterface*, mavlink_message_t message)
     const int count = model->objectList()->count();
     for (int i = 0; i < count; ++i) {
         Vehicle* vehicle = qobject_cast<Vehicle*>(model->get(i));
-        if (!vehicle) {
+        if (!vehicle || !_formationVehicleIds.contains(vehicle->id())
+            || !vehicle->vehicleLinkManager()
+            || vehicle->vehicleLinkManager()->communicationLost()) {
             continue;
         }
 
@@ -615,11 +1342,20 @@ void SwarmController::_receiveMessage(LinkInterface*, mavlink_message_t message)
             continue;
         }
 
+        mavlink_follow_target_t followTarget{};
+        followTarget.timestamp = gpsRaw.time_usec;
+        followTarget.custom_state = kFollowTargetMagicPrefix | _formationSessionId;
+        followTarget.est_capabilities = 1;
+        followTarget.lat = gpsRaw.lat;
+        followTarget.lon = gpsRaw.lon;
+        followTarget.alt = static_cast<float>(gpsRaw.alt) / 1000.f;
+
         mavlink_message_t msg;
-        mavlink_msg_gps_raw_int_pack_chan(1, 1, sharedLink->mavlinkChannel(), &msg,
-                                          gpsRaw.time_usec, gpsRaw.fix_type, gpsRaw.lat, gpsRaw.lon, gpsRaw.alt,
-                                          gpsRaw.eph, gpsRaw.epv, gpsRaw.vel, 0, 0, 0, 0, 0, 0,
-                                          gpsRaw.hdg_acc, gpsRaw.yaw);
+        mavlink_msg_follow_target_encode_chan(static_cast<uint8_t>(mavlinkProtocol->getSystemId()),
+                                              static_cast<uint8_t>(mavlinkProtocol->getComponentId()),
+                                              sharedLink->mavlinkChannel(),
+                                              &msg,
+                                              &followTarget);
         vehicle->sendMessageOnLinkThreadSafe(sharedLink.get(), msg);
     }
 }

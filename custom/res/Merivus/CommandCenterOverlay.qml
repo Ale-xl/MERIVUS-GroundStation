@@ -1,7 +1,6 @@
 import QtQuick          2.12
 import QtQuick.Controls 2.4
 import QtQuick.Layouts  1.11
-
 import QGroundControl               1.0
 import QGroundControl.Controls      1.0
 import QGroundControl.FlightDisplay 1.0
@@ -12,10 +11,15 @@ import QGroundControl.ScreenTools   1.0
 Item {
     id: root
 
+    // 本覆盖层是人工控制入口：只把操作者当前选择交给 Guided/Swarm 确认流程，
+    // 不消费 AI proposal，也不把界面显示状态当作飞控 ACK。
+    GpsStatus { id: gpsStatus }
+
     property var selectedIds: []
     property var vehicles: QGroundControl.multiVehicleManager.vehicles
     property var activeVehicle: QGroundControl.multiVehicleManager.activeVehicle
     property var toolInsets
+    property alias videoDockTarget: videoViewport
 
     signal vehicleSelectionRequested(int vehicleId, bool selected)
     signal vehicleFocusRequested(int vehicleId)
@@ -56,16 +60,19 @@ Item {
     property int rightPanelVehicleId: -1
     property real altitudeCommandMeters: 10
     property real speedCommandMetersSecond: 5
-    property real climbCommandMetersSecond: 1.5
+    property real takeoffSpeedCommandMetersSecond: 1.5
     property date now: new Date()
 
     visible: width > 900 && height > 560
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
+    FtcStatusPalette { id: ftcStatusPalette }
     Timer { interval: 1000; running: root.visible; repeat: true; onTriggered: root.now = new Date() }
 
     function tr(text) { return qsTr(text) }
     function clamp(value, minValue, maxValue) { return Math.max(minValue, Math.min(maxValue, value)) }
+    // Preserve the previous 96-DPI sizing while following QGC's point-size convention.
+    function fontPointSize(pixelSize) { return pixelSize * 0.75 }
 
     function vehicleById(vehicleId) {
         if (!vehicles) return null
@@ -130,10 +137,18 @@ Item {
 
     function metricTextFor(vehicle, kind, decimals, suffix) {
         if (kind === "time") return vehicle ? elapsedText(vehicle.flightTime) : "--"
+        if (kind === "gps" && vehicle && vehicle.gps) {
+            var fixType = Number(vehicle.gps.lock.rawValue)
+            if (isNaN(fixType) || fixType < 2) return tr("无有效定位")
+        }
         return numberText(metricFactFor(vehicle, kind), decimals, suffix)
     }
 
     function metricText(kind, decimals, suffix) { return metricTextFor(focusVehicle, kind, decimals, suffix) }
+
+    function showGpsDetails(vehicle) {
+        mainWindow.showMessageDialog(tr("GPS / RTK 状态"), gpsStatus.details(vehicle, QGroundControl.gpsRtk))
+    }
 
 function elapsedText(fact) {
         if (!factHasValue(fact)) return "--"
@@ -198,25 +213,67 @@ function escFact(vehicle, prefix, motorIndex) {
         return escHasData(vehicle, motorIndex) ? numberText(escFact(vehicle, prefix, motorIndex), decimals, suffix) : "--"
     }
 
-    function escFactNonZero(vehicle, prefix, motorIndex) {
-        var fact = escFact(vehicle, prefix, motorIndex)
-        return factHasValue(fact) && Math.abs(Number(fact.rawValue)) > 0.001
+    function escHasData(vehicle, motorIndex) {
+        return !!(vehicle && vehicle.escStatus && vehicle.escStatus.received)
     }
 
-    function escHasData(vehicle, motorIndex) {
-        return escFactNonZero(vehicle, "rpm", motorIndex)
-            || escFactNonZero(vehicle, "current", motorIndex)
-            || escFactNonZero(vehicle, "voltage", motorIndex)
+    function escMotorOnline(vehicle, motorIndex) {
+        if (!escHasData(vehicle, motorIndex)) return false
+        if (!vehicle.escStatus.infoReceived) return true
+        return (Number(vehicle.escStatus.onlineFlags.rawValue) & (1 << motorIndex)) !== 0
+    }
+
+    function escConnectionText(vehicle) {
+        if (!vehicle || !vehicle.escStatus || !vehicle.escStatus.infoReceived) return tr("未知")
+        var type = Number(vehicle.escStatus.connectionType.rawValue)
+        return type === 1 ? tr("串行遥测")
+             : type === 4 ? tr("CAN")
+             : type === 5 ? tr("DShot 独立遥测")
+             : type === 0 ? tr("PWM/PPM")
+             : tr("类型 %1").arg(type)
+    }
+
+    function escStatusText(vehicle) {
+        if (!vehicle) return tr("无数据源")
+        if (!vehicle.escStatus || !vehicle.escStatus.received) return tr("未收到遥测")
+        return tr("遥测在线")
     }
 
     function escTipText(motorIndex) {
         var label = tr("电机 M%1").arg(motorIndex + 1)
         if (!focusVehicle) return label + "\n" + tr("等待飞行器接入后显示 ESC 遥测。")
-        if (!escHasData(focusVehicle, motorIndex)) return label + "\n" + tr("等待 ESC_STATUS 遥测；收到后显示转速、电流、电压。")
+        if (!escHasData(focusVehicle, motorIndex)) return label + "\n" +
+                tr("地面站已请求 ESC_STATUS/ESC_INFO，但飞控没有数据可发。DShot 电调请确认遥测线已接入飞控串口并配置 DSHOT_TEL_CFG；CAN 电调请确认 CAN 节点在线。")
         return label + "\n" +
+               tr("状态：%1").arg(escMotorOnline(focusVehicle, motorIndex) ? tr("在线") : tr("离线")) + "\n" +
+               tr("接口：%1").arg(escConnectionText(focusVehicle)) + "\n" +
                tr("转速：%1").arg(escNumber(focusVehicle, "rpm", motorIndex, 0, "rpm")) + "\n" +
                tr("电流：%1").arg(escNumber(focusVehicle, "current", motorIndex, 1, "A")) + "\n" +
-               tr("电压：%1").arg(escNumber(focusVehicle, "voltage", motorIndex, 1, "V"))
+               tr("电压：%1").arg(escNumber(focusVehicle, "voltage", motorIndex, 1, "V")) + "\n" +
+               tr("电调温度：%1").arg(escNumber(focusVehicle, "temperature", motorIndex, 1, "°C"))
+    }
+
+    function ftcMotorData(vehicle, motorIndex) {
+        if (!vehicle || !vehicle.ftcStatus || !vehicle.ftcStatus.motorAvailable || vehicle.ftcStatus.motorStale) return null
+        if (motorIndex < 0 || motorIndex >= vehicle.ftcStatus.motorCount) return null
+        return vehicle.ftcStatus.motors.get(motorIndex)
+    }
+
+    function ftcPercentText(value) {
+        return value !== undefined && value >= 0 ? Number(value).toFixed(0) + "%" : tr("N/A")
+    }
+
+    function motorTipText(motorIndex) {
+        var text = escTipText(motorIndex)
+        var motor = ftcMotorData(focusVehicle, motorIndex)
+        if (!motor) return text + "\n" + tr("FTC 健康与效能：N/A")
+        return text + "\n" +
+               tr("FTC 健康：%1（不是剩余寿命）").arg(ftcPercentText(motor.health)) + "\n" +
+               tr("FTC 效能：%1").arg(ftcPercentText(motor.effectiveness)) + "\n" +
+               tr("故障概率：%1，置信度：%2").arg(ftcPercentText(motor.faultProbability)).arg(ftcPercentText(motor.confidence)) + "\n" +
+               tr("不确定度 σ：%1，估计年龄：%2 s").arg(motor.uncertainty >= 0 ? Number(motor.uncertainty).toFixed(3) : "N/A")
+                   .arg(motor.estimateAge >= 0 ? Number(motor.estimateAge).toFixed(2) : "N/A") + "\n" +
+               tr("状态：%1，分类：%2").arg(motor.dataStateText).arg(motor.faultTypeText)
     }
 
     function linkStateText(vehicle) {
@@ -227,19 +284,32 @@ function escFact(vehicle, prefix, motorIndex) {
 
     function runGuidedAction(actionId, actionData) {
         if (!guidedController || actionId < 0) return
+        if (actionId === guidedController.actionTakeoff) {
+            guidedController.defaultTakeoffAltitudeMeters = altitudeCommandMeters
+        }
         guidedController.closeAll()
         guidedController.confirmAction(actionId, actionData)
     }
 
+    // 确认框打开后仍可能继续选择车辆，因此执行数据必须使用当时的不可变副本。
     function selectedIdsSnapshot() { return selectedIds ? selectedIds.slice(0) : [] }
+
+    function hasValidFormationSelection() {
+        if (!selectedIds || (selectedIds.length !== 1 && selectedIds.length !== 2 && selectedIds.length !== 6)) return false
+        var sorted = selectedIdsSnapshot().sort(function(a, b) { return Number(a) - Number(b) })
+        if (Number(sorted[0]) !== 1) return false
+        return sorted.length !== 6 || sorted.join(",") === "1,2,3,4,5,6"
+    }
 
     function showFloatingToolTip(sourceItem, text, align) {
         if (!sourceItem || !text) return
-        var anchor = sourceItem.mapToItem(root, sourceItem.width, sourceItem.height + 6)
+        var anchor = sourceItem.mapToItem(root, 0, 0)
         floatingToolTip.text = text
         floatingToolTip.align = align ? align : "right"
-        floatingToolTip.anchorX = anchor.x
-        floatingToolTip.anchorY = anchor.y
+        floatingToolTip.sourceX = anchor.x
+        floatingToolTip.sourceY = anchor.y
+        floatingToolTip.sourceWidth = sourceItem.width
+        floatingToolTip.sourceHeight = sourceItem.height
     }
 
     function hideFloatingToolTip() { floatingToolTip.text = "" }
@@ -253,20 +323,20 @@ function escFact(vehicle, prefix, motorIndex) {
     function controlValueText(kind) {
         if (kind === "altitude") return altitudeCommandMeters.toFixed(1)
         if (kind === "speed") return speedCommandMetersSecond.toFixed(1)
-        if (kind === "climb") return climbCommandMetersSecond.toFixed(1)
+        if (kind === "takeoffSpeed") return takeoffSpeedCommandMetersSecond.toFixed(1)
         return "0.0"
     }
 
     function setControlValue(kind, value) {
         if (kind === "altitude") altitudeCommandMeters = numericInput(value, altitudeCommandMeters, -100, 100)
         else if (kind === "speed") speedCommandMetersSecond = numericInput(value, speedCommandMetersSecond, 0.1, 40)
-        else if (kind === "climb") climbCommandMetersSecond = numericInput(value, climbCommandMetersSecond, 0.1, 15)
+        else if (kind === "takeoffSpeed") takeoffSpeedCommandMetersSecond = numericInput(value, takeoffSpeedCommandMetersSecond, 1, 5)
     }
 
     function adjustControlValue(kind, delta) {
         if (kind === "altitude") altitudeCommandMeters = numericInput(altitudeCommandMeters + delta, altitudeCommandMeters, -100, 100)
         else if (kind === "speed") speedCommandMetersSecond = numericInput(speedCommandMetersSecond + delta, speedCommandMetersSecond, 0.1, 40)
-        else if (kind === "climb") climbCommandMetersSecond = numericInput(climbCommandMetersSecond + delta, climbCommandMetersSecond, 0.1, 15)
+        else if (kind === "takeoffSpeed") takeoffSpeedCommandMetersSecond = numericInput(takeoffSpeedCommandMetersSecond + delta, takeoffSpeedCommandMetersSecond, 1, 5)
     }
 
     function canSendFocusCommand() {
@@ -290,13 +360,51 @@ function escFact(vehicle, prefix, motorIndex) {
         return false
     }
 
+    function vehicleCanLand(vehicle) {
+        if (!vehicle || !vehicle.initialConnectComplete || !vehicle.guidedModeSupported
+                || !vehicle.armed || !vehicle.flying || vehicle.fixedWing) return false
+        if (vehicle.vehicleLinkManager && vehicle.vehicleLinkManager.communicationLost) return false
+        return vehicle.flightMode !== vehicle.landFlightMode
+    }
+
+    function landTargetsAvailable() {
+        if (!guidedController) return false
+        if (selectedCount() === 0) return guidedController.showLand
+
+        for (var i = 0; i < selectedIds.length; i++) {
+            if (vehicleCanLand(vehicleById(selectedIds[i]))) return true
+        }
+        return false
+    }
+
+    function vehicleCanRTL(vehicle) {
+        if (!vehicle || !vehicle.initialConnectComplete || !vehicle.guidedModeSupported
+                || !vehicle.armed || !vehicle.flying) return false
+        if (vehicle.vehicleLinkManager && vehicle.vehicleLinkManager.communicationLost) return false
+        return vehicle.flightMode !== vehicle.rtlFlightMode && vehicle.flightMode !== vehicle.smartRTLFlightMode
+    }
+
+    function rtlTargetsAvailable() {
+        if (!guidedController) return false
+        if (selectedCount() === 0) return guidedController.showRTL
+
+        for (var i = 0; i < selectedIds.length; i++) {
+            if (vehicleCanRTL(vehicleById(selectedIds[i]))) return true
+        }
+        return false
+    }
+
     function guidedActionData(actionId) {
         if (!guidedController) return undefined
-        return actionId === guidedController.actionTakeoff || actionId === guidedController.actionSwarm
+        return actionId === guidedController.actionTakeoff
+                || actionId === guidedController.actionLand
+                || actionId === guidedController.actionRTL
+                || actionId === guidedController.actionSwarm
                 ? selectedIdsSnapshot() : undefined
     }
 
     function applyControlCommand(kind) {
+        // 这些是显式人工参数/Guided 操作，不属于 AI 建议链路。
         if (!canSendFocusCommand()) {
             mainWindow.showMessageDialog(tr("指令未发送"), tr("当前没有可用的焦点飞行器，或链路已断开。"))
             return
@@ -306,9 +414,19 @@ function escFact(vehicle, prefix, motorIndex) {
         } else if (kind === "speed") {
             if (focusVehicle.fixedWing || focusVehicle.vtolInFwdFlight) focusVehicle.guidedModeChangeEquivalentAirspeedMetersSecond(speedCommandMetersSecond)
             else focusVehicle.guidedModeChangeGroundSpeedMetersSecond(speedCommandMetersSecond)
-        } else if (kind === "climb") {
-            focusVehicle.sendCommand(1, 178, true, 2, climbCommandMetersSecond, -1, 0, 0, 0, 0)
+        } else if (kind === "takeoffSpeed") {
+            if (!focusVehicle.setGuidedTakeoffSpeed(takeoffSpeedCommandMetersSecond)) {
+                mainWindow.showMessageDialog(tr("参数未下发"),
+                                             tr("当前飞行器未提供 MPC_TKO_SPEED，或输入值超出飞控允许范围。"))
+            }
         }
+    }
+
+    function configuredTakeoffSpeedText(vehicle) {
+        var refreshTick = now
+        if (!vehicle) return "--"
+        var value = Number(vehicle.guidedTakeoffSpeed())
+        return isNaN(value) ? "--" : value.toFixed(1) + " m/s"
     }
 
     Rectangle {
@@ -373,12 +491,12 @@ function escFact(vehicle, prefix, motorIndex) {
                     text: tr("\u98de\u884c\u63a7\u5236")
                     color: qgcPal.text
                     font.bold: true
-                    font.pixelSize: 18
+                    font.pointSize: root.fontPointSize(18)
                 }
                 QGCLabel {
                     text: root.vehicles ? tr("%1 \u67b6\u5728\u7ebf\u5217\u8868").arg(root.vehicles.count) : tr("0 \u67b6")
                     color: qgcPal.colorGrey
-                    font.pixelSize: 11
+                    font.pointSize: root.fontPointSize(11)
                 }
                 QGCButton {
                     id: leftCollapseButton
@@ -419,7 +537,7 @@ function escFact(vehicle, prefix, motorIndex) {
                     verticalAlignment: Text.AlignVCenter
                     text: root.selectedSummary()
                     color: root.selectedCount() > 0 ? root.accent : qgcPal.colorGrey
-                    font.pixelSize: root.selectedCount() > 0 ? 14 : 12
+                    font.pointSize: root.fontPointSize(root.selectedCount() > 0 ? 14 : 12)
                     font.bold: root.selectedCount() > 0
                     elide: Text.ElideRight
                 }
@@ -429,8 +547,20 @@ function escFact(vehicle, prefix, motorIndex) {
                 Layout.fillWidth: true
                 text: root.focusVehicle ? tr("\u5f53\u524d\u7126\u70b9 UAV-%1").arg(root.focusVehicle.id) : tr("\u5f53\u524d\u65e0\u98de\u884c\u5668\u7126\u70b9")
                 color: qgcPal.colorGrey
-                font.pixelSize: 11
+                font.pointSize: root.fontPointSize(11)
                 elide: Text.ElideRight
+            }
+
+            QGCLabel {
+                Layout.fillWidth: true
+                text: root.guidedController && root.guidedController.formationStatus
+                        ? root.guidedController.formationStatus
+                        : (root.guidedController && root.guidedController.swarmModeEnabled
+                           ? tr("编队协议：已启用")
+                           : tr("编队协议：未启用"))
+                color: root.guidedController && root.guidedController.swarmModeEnabled ? root.nominal : qgcPal.colorOrange
+                font.pointSize: root.fontPointSize(11)
+                font.bold: true
             }
 
             GridLayout {
@@ -442,9 +572,20 @@ function escFact(vehicle, prefix, motorIndex) {
                     model: [
                         { title: tr("\u4efb\u52a1\u89c4\u5212"), icon: "/qmlimages/Plan.svg", enabled: true, type: "plan", action: -1 },
                         { title: tr("\u8d77\u98de"), icon: "/res/takeoff.svg", enabled: root.takeoffTargetsAvailable(), type: "guided", action: root.guidedController ? root.guidedController.actionTakeoff : -1 },
-                        { title: tr("\u964d\u843d"), icon: "/res/land.svg", enabled: root.guidedController && root.guidedController.showLand, type: "guided", action: root.guidedController ? root.guidedController.actionLand : -1 },
-                        { title: tr("\u8fd4\u822a"), icon: "/res/rtl.svg", enabled: root.guidedController && root.guidedController.showRTL, type: "guided", action: root.guidedController ? root.guidedController.actionRTL : -1 },
-                        { title: tr("\u7f16\u961f"), icon: "/qmlimages/swarm.svg", enabled: root.guidedController && root.selectedCount() >= 2, type: "guided", action: root.guidedController ? root.guidedController.actionSwarm : -1 }
+                        { title: tr("\u964d\u843d"), icon: "/res/land.svg", enabled: root.landTargetsAvailable(), type: "guided", action: root.guidedController ? root.guidedController.actionLand : -1 },
+                        { title: tr("\u8fd4\u822a"), icon: "/res/rtl.svg", enabled: root.rtlTargetsAvailable(), type: "guided", action: root.guidedController ? root.guidedController.actionRTL : -1 },
+                        {
+                            title: root.guidedController && (root.guidedController.formationActive || root.guidedController.formationBusy) ? tr("结束编队") : tr("\u7f16\u961f"),
+                            icon: "/qmlimages/swarm.svg",
+                            enabled: root.guidedController && (root.guidedController.formationActive
+                                     || root.guidedController.formationBusy
+                                     || (root.guidedController.swarmModeEnabled && root.hasValidFormationSelection())),
+                            type: "guided",
+                            action: root.guidedController
+                                    ? ((root.guidedController.formationActive || root.guidedController.formationBusy)
+                                       ? root.guidedController.actionEndSwarm : root.guidedController.actionSwarm)
+                                    : -1
+                        }
                     ]
                     Rectangle {
                         Layout.fillWidth: true
@@ -468,7 +609,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: modelData.title
                                 color: qgcPal.text
                                 font.bold: true
-                                font.pixelSize: 11
+                                font.pointSize: root.fontPointSize(11)
                             }
                         }
                         MouseArea {
@@ -497,12 +638,12 @@ function escFact(vehicle, prefix, motorIndex) {
                     text: root.focusVehicle ? "UAV-" + root.focusVehicle.id : tr("\u65e0\u4eba\u673a\u53c2\u6570")
                     color: qgcPal.text
                     font.bold: true
-                    font.pixelSize: 14
+                    font.pointSize: root.fontPointSize(14)
                 }
                 QGCLabel {
                     text: "\u25cb " + root.linkStateText(root.focusVehicle)
                     color: root.focusVehicle && !(root.focusVehicle.vehicleLinkManager && root.focusVehicle.vehicleLinkManager.communicationLost) ? root.nominal : root.muted
-                    font.pixelSize: 11
+                    font.pointSize: root.fontPointSize(11)
                 }
             }
 
@@ -510,7 +651,7 @@ function escFact(vehicle, prefix, motorIndex) {
                 Layout.fillWidth: true
                 text: root.focusVehicle ? ((root.focusVehicle.armed ? tr("\u5df2\u89e3\u9501") : tr("\u672a\u89e3\u9501")) + " / " + root.focusVehicle.flightMode) : tr("\u7b49\u5f85\u98de\u884c\u5668\u63a5\u5165")
                 color: qgcPal.colorGrey
-                font.pixelSize: 11
+                font.pointSize: root.fontPointSize(11)
                 elide: Text.ElideRight
             }
 
@@ -521,12 +662,12 @@ function escFact(vehicle, prefix, motorIndex) {
                 rowSpacing: 5
                 Repeater {
                     model: [
-                        { label: tr("\u9ad8\u5ea6"), kind: "altitude", adjustable: true, value: root.metricText("altitude", 1, "m"), step: 1.0, unit: "m", limitTop: 100, limitBottom: -100, tip: tr("高度增量命令：正值上升、负值下降，默认 10 m") },
+                        { label: tr("\u9ad8\u5ea6"), kind: "altitude", adjustable: true, value: root.metricText("altitude", 1, "m"), step: 1.0, unit: "m", limitTop: 100, limitBottom: -100, tip: tr("飞行中为相对高度增量；点击起飞时同时作为默认起飞高度") },
                         { label: tr("\u5730\u901f"), kind: "speed", adjustable: true, value: root.metricText("speed", 1, "m/s"), step: 0.5, unit: "m/s", limitTop: 40, limitBottom: 0.1, tip: tr("目标速度命令：默认 5 m/s") },
-                        { label: tr("\u722c\u5347"), kind: "climb", adjustable: true, value: root.metricText("climb", 1, "m/s"), step: 0.2, unit: "m/s", limitTop: 15, limitBottom: 0.1, tip: tr("目标爬升速度") },
+                        { label: tr("起飞速度"), kind: "takeoffSpeed", adjustable: true, value: root.configuredTakeoffSpeedText(root.focusVehicle), step: 0.1, unit: "m/s", limitTop: 5, limitBottom: 1, tip: tr("写入 PX4 参数 MPC_TKO_SPEED；MAV_CMD_NAV_TAKEOFF 本身不携带速度") },
                         { label: tr("\u822a\u5411"), kind: "heading", adjustable: false, value: root.metricText("heading", 0, "\u00b0"), tip: tr("机头朝向（0/360 为北向）") },
                         { label: tr("\u7535\u6c60"), kind: "battery", adjustable: false, value: root.metricText("battery", 0, "%"), tip: tr("主电池剩余百分比") },
-                        { label: "GPS", kind: "gps", adjustable: false, value: root.metricText("gps", 0, tr("\u661f")), tip: tr("GPS 可用卫星数量") }
+                        { label: "GPS/RTK", kind: "gps", adjustable: false, value: gpsStatus.summary(root.focusVehicle), tip: tr("点击查看定位类型、精度、速度、高度、GNSS 航向和双接收机信息") }
                     ]
                     Rectangle {
                         Layout.fillWidth: true
@@ -543,7 +684,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                 horizontalAlignment: Text.AlignHCenter
                                 text: modelData.label
                                 color: qgcPal.colorGrey
-                                font.pixelSize: 10
+                                font.pointSize: root.fontPointSize(10)
                             }
                             QGCLabel {
                                 Layout.fillWidth: true
@@ -552,7 +693,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: tr("实时") + " " + modelData.value
                                 color: root.accent
                                 font.bold: true
-                                font.pixelSize: 12
+                                font.pointSize: root.fontPointSize(12)
                             }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -573,7 +714,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                     Layout.preferredHeight: 24
                                     text: root.controlValueText(modelData.kind)
                                     horizontalAlignment: Text.AlignHCenter
-                                    font.pixelSize: 11
+                                    font.pointSize: root.fontPointSize(11)
                                     validator: DoubleValidator { bottom: modelData.adjustable ? modelData.limitBottom : 0; top: modelData.adjustable ? modelData.limitTop : 1; decimals: 1 }
                                     onEditingFinished: root.setControlValue(modelData.kind, text)
                                 }
@@ -606,14 +747,16 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: modelData.value
                                 color: qgcPal.text
                                 font.bold: true
-                                font.pixelSize: 12
+                                font.pointSize: root.fontPointSize(12)
                             }
                         }
                         MouseArea {
                             id: paramTipMouse
                             anchors.fill: parent
                             hoverEnabled: true
-                            acceptedButtons: Qt.NoButton
+                            acceptedButtons: modelData.kind === "gps" ? Qt.LeftButton : Qt.NoButton
+                            cursorShape: modelData.kind === "gps" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: if (modelData.kind === "gps") root.showGpsDetails(root.focusVehicle)
                         }
                         MerivusToolTip {
                             visible: paramTipMouse.containsMouse
@@ -634,12 +777,12 @@ function escFact(vehicle, prefix, motorIndex) {
                     text: tr("\u7535\u673a / ESC")
                     color: qgcPal.text
                     font.bold: true
-                    font.pixelSize: 12
+                    font.pointSize: root.fontPointSize(12)
                 }
                 QGCLabel {
-                    text: root.focusVehicle ? tr("\u5df2\u63a5\u5165") : tr("\u65e0\u6570\u636e\u6e90")
-                    color: root.focusVehicle ? root.nominal : root.muted
-                    font.pixelSize: 11
+                    text: root.escStatusText(root.focusVehicle)
+                    color: root.focusVehicle && root.escHasData(root.focusVehicle, 0) ? root.nominal : root.muted
+                    font.pointSize: root.fontPointSize(11)
                 }
             }
 
@@ -656,11 +799,13 @@ function escFact(vehicle, prefix, motorIndex) {
                         { label: "M4", index: 3, direction: "CCW" }
                     ]
                     Rectangle {
+                        property var ftcMotor: root.ftcMotorData(root.focusVehicle, modelData.index)
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 56
+                        Layout.preferredHeight: 72
                         radius: 5
                         color: escMouse.containsMouse ? root.raisedColor : qgcPal.windowShade
-                        border.color: root.escHasData(root.focusVehicle, modelData.index) ? root.nominal : (escMouse.containsMouse ? root.accent : root.mutedLine)
+                        border.color: ftcMotor ? ftcStatusPalette.colorFor(ftcMotor.severity)
+                                               : (root.escMotorOnline(root.focusVehicle, modelData.index) ? root.nominal : (escMouse.containsMouse ? root.accent : root.mutedLine))
                         Column {
                             anchors.fill: parent
                             anchors.margins: 5
@@ -668,8 +813,8 @@ function escFact(vehicle, prefix, motorIndex) {
                             Row {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 spacing: 3
-                                QGCLabel { text: modelData.label; color: qgcPal.text; font.bold: true; font.pixelSize: 11 }
-                                QGCLabel { text: root.escHasData(root.focusVehicle, modelData.index) ? "\u25cf" : "\u25cb"; color: root.escHasData(root.focusVehicle, modelData.index) ? root.nominal : root.muted; font.pixelSize: 9 }
+                                QGCLabel { text: modelData.label; color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(11) }
+                                QGCLabel { text: root.escMotorOnline(root.focusVehicle, modelData.index) ? "\u25cf" : "\u25cb"; color: root.escMotorOnline(root.focusVehicle, modelData.index) ? root.nominal : root.muted; font.pointSize: root.fontPointSize(9) }
                             }
                             Row {
                                 anchors.horizontalCenter: parent.horizontalCenter
@@ -678,12 +823,12 @@ function escFact(vehicle, prefix, motorIndex) {
                                     text: root.escNumber(root.focusVehicle, "rpm", modelData.index, 0, "")
                                     color: qgcPal.text
                                     font.bold: true
-                                    font.pixelSize: 12
+                                    font.pointSize: root.fontPointSize(12)
                                 }
                                 QGCLabel {
                                     text: tr("rpm")
                                     color: qgcPal.colorGrey
-                                    font.pixelSize: 9
+                                    font.pointSize: root.fontPointSize(9)
                                 }
                             }
                             QGCLabel {
@@ -691,7 +836,14 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: modelData.direction
                                 color: root.accent
                                 font.bold: true
-                                font.pixelSize: 10
+                                font.pointSize: root.fontPointSize(10)
+                            }
+                            QGCLabel {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: ftcMotor ? tr("H %1 · E %2").arg(root.ftcPercentText(ftcMotor.health)).arg(root.ftcPercentText(ftcMotor.effectiveness))
+                                               : tr("H N/A · E N/A")
+                                color: ftcMotor ? ftcStatusPalette.colorFor(ftcMotor.severity) : root.muted
+                                font.pointSize: root.fontPointSize(9)
                             }
                         }
                         MouseArea {
@@ -699,17 +851,18 @@ function escFact(vehicle, prefix, motorIndex) {
                             anchors.fill: parent
                             hoverEnabled: true
                             acceptedButtons: Qt.NoButton
-                        }
-                        MerivusToolTip {
-                            visible: escMouse.containsMouse
-                            text: root.escTipText(modelData.index)
-                            anchors.left: parent.left
-                            anchors.bottom: parent.top
-                            anchors.bottomMargin: 6
-                            maximumWidth: 240
+                            onContainsMouseChanged: containsMouse
+                                ? root.showFloatingToolTip(this, root.motorTipText(modelData.index), "right")
+                                : root.hideFloatingToolTip()
                         }
                     }
                 }
+            }
+
+            FtcStatusPanel {
+                Layout.fillWidth: true
+                vehicle: root.focusVehicle
+                statusPalette: ftcStatusPalette
             }
 
             RowLayout {
@@ -719,7 +872,7 @@ function escFact(vehicle, prefix, motorIndex) {
                     text: tr("\u65e0\u4eba\u673a\u5217\u8868")
                     color: qgcPal.text
                     font.bold: true
-                    font.pixelSize: 13
+                    font.pointSize: root.fontPointSize(13)
                 }
                 Rectangle {
                     visible: root.selectedCount() > 0
@@ -733,7 +886,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         text: tr("\u6e05\u9664")
                         color: clearMouse.containsMouse ? root.accent : qgcPal.text
                         font.bold: true
-                        font.pixelSize: 11
+                        font.pointSize: root.fontPointSize(11)
                     }
                     MouseArea {
                         id: clearMouse
@@ -797,19 +950,19 @@ function escFact(vehicle, prefix, motorIndex) {
                                     text: vehicle ? "UAV-" + vehicle.id : "UAV--"
                                     color: root.isSelected(vehicle.id) ? root.accent : qgcPal.text
                                     font.bold: true
-                                    font.pixelSize: 12
+                                    font.pointSize: root.fontPointSize(12)
                                 }
                                 QGCLabel {
                                     Layout.fillWidth: true
                                     text: vehicle ? ((vehicle.armed ? tr("\u5df2\u89e3\u9501") : tr("\u672a\u89e3\u9501")) + " / " + vehicle.flightMode) : "--"
                                     color: qgcPal.colorGrey
-                                    font.pixelSize: 11
+                                    font.pointSize: root.fontPointSize(11)
                                     elide: Text.ElideRight
                                 }
                                 QGCLabel {
                                     text: root.batteryPercent(vehicle)
                                     color: qgcPal.text
-                                    font.pixelSize: 11
+                                    font.pointSize: root.fontPointSize(11)
                                 }
                             }
 
@@ -818,7 +971,6 @@ function escFact(vehicle, prefix, motorIndex) {
                                 acceptedButtons: Qt.LeftButton
                                 onClicked: {
                                     root.vehicleFocusRequested(vehicle.id)
-                                    root.vehicleSelectionRequested(vehicle.id, !root.isSelected(vehicle.id))
                                 }
                             }
                         }
@@ -829,7 +981,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         visible: !root.vehicles || root.vehicles.count === 0
                         text: tr("\u6682\u65e0\u63a5\u5165\u98de\u884c\u5668")
                         color: qgcPal.colorGrey
-                        font.pixelSize: 12
+                        font.pointSize: root.fontPointSize(12)
                     }
                 }
             }
@@ -1022,7 +1174,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         text: tr("环境 / 姿态 / 视频")
                         color: qgcPal.text
                         font.bold: true
-                        font.pixelSize: 18
+                        font.pointSize: root.fontPointSize(18)
                     }
                     RowLayout {
                         visible: root.selectedCount() > 1
@@ -1033,7 +1185,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                 id: rightVehicleOption
                                 text: "UAV-" + modelData
                                 checked: root.rightVehicleSelected(modelData)
-                                font.pixelSize: 10
+                                font.pointSize: root.fontPointSize(10)
                                 font.bold: checked
                                 onClicked: root.rightPanelVehicleId = modelData
                                 indicator: Rectangle {
@@ -1055,7 +1207,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                         text: rightVehicleOption.text
                                         color: rightVehicleOption.checked ? root.accent : qgcPal.text
                                         font.bold: rightVehicleOption.checked
-                                        font.pixelSize: 10
+                                        font.pointSize: root.fontPointSize(10)
                                     }
                                 }
                             }
@@ -1067,7 +1219,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         checked: root.rightVehicle !== null
                         enabled: root.rightVehicle !== null
                         text: root.rightVehicle ? "UAV-" + root.rightVehicle.id : tr("\u65e0\u6570\u636e")
-                        font.pixelSize: 11
+                        font.pointSize: root.fontPointSize(11)
                         font.bold: true
                         indicator: Rectangle {
                             implicitWidth: 13
@@ -1088,7 +1240,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: singleRightVehicleCheck.text
                                 color: singleRightVehicleCheck.checked ? root.accent : root.muted
                                 font.bold: true
-                                font.pixelSize: 11
+                                font.pointSize: root.fontPointSize(11)
                             }
                         }
                     }
@@ -1120,7 +1272,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         spacing: 7
                         RowLayout {
                             Layout.fillWidth: true
-                            QGCLabel { Layout.fillWidth: true; text: tr("环境参数"); color: qgcPal.text; font.bold: true; font.pixelSize: 14 }
+                            QGCLabel { Layout.fillWidth: true; text: tr("环境参数"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(14) }
                         }
                         GridLayout {
                             Layout.fillWidth: true
@@ -1146,9 +1298,8 @@ function escFact(vehicle, prefix, motorIndex) {
                                     Column {
                                         anchors.centerIn: parent
                                         spacing: 1
-                                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: qgcPal.colorGrey; font.pixelSize: 10 }
-                                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.value; color: qgcPal.text; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
-                                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.detail; color: qgcPal.colorGrey; font.pixelSize: 9; elide: Text.ElideRight }
+                                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: qgcPal.colorGrey; font.pointSize: root.fontPointSize(10) }
+                                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.value; color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(13); elide: Text.ElideRight }
                                     }
                                 }
                             }
@@ -1180,12 +1331,12 @@ function escFact(vehicle, prefix, motorIndex) {
                                 text: tr("姿态与传感器")
                                 color: qgcPal.text
                                 font.bold: true
-                                font.pixelSize: 14
+                                font.pointSize: root.fontPointSize(14)
                             }
                             QGCLabel {
                                 text: tr("R %1 / P %2 / H %3").arg(root.attitudeTextFor(root.rightVehicle, "roll")).arg(root.attitudeTextFor(root.rightVehicle, "pitch")).arg(root.metricTextFor(root.rightVehicle, "heading", 0, "°"))
                                 color: qgcPal.colorGrey
-                                font.pixelSize: 10
+                                font.pointSize: root.fontPointSize(10)
                             }
                         }
 
@@ -1207,7 +1358,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                     spacing: 3
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        QGCLabel { Layout.fillWidth: true; text: tr("水平仪"); color: qgcPal.text; font.bold: true; font.pixelSize: 13 }
+                                        QGCLabel { Layout.fillWidth: true; text: tr("水平仪"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(13) }
                                     }
                                     QGCAttitudeWidget {
                                         Layout.alignment: Qt.AlignHCenter
@@ -1223,7 +1374,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     acceptedButtons: Qt.NoButton
-                                    onContainsMouseChanged: containsMouse ? root.showFloatingToolTip(this, tr("Attitude indicator: displays roll and pitch from the selected vehicle attitude telemetry."), "left") : root.hideFloatingToolTip()
+                                    onContainsMouseChanged: containsMouse ? root.showFloatingToolTip(this, tr("水平仪：显示所选无人机遥测中的横滚角与俯仰角。"), "left") : root.hideFloatingToolTip()
                                 }
                             }
 
@@ -1240,8 +1391,8 @@ function escFact(vehicle, prefix, motorIndex) {
                                     spacing: 3
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        QGCLabel { Layout.fillWidth: true; text: tr("指南针"); color: qgcPal.text; font.bold: true; font.pixelSize: 13 }
-                                        QGCLabel { text: root.metricTextFor(root.rightVehicle, "heading", 0, "°"); color: root.accent; font.bold: true; font.pixelSize: 12 }
+                                        QGCLabel { Layout.fillWidth: true; text: tr("指南针"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(13) }
+                                        QGCLabel { text: root.metricTextFor(root.rightVehicle, "heading", 0, "°"); color: root.accent; font.bold: true; font.pointSize: root.fontPointSize(12) }
                                     }
                                     Rectangle {
                                         id: compassFace
@@ -1266,7 +1417,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                                 text: modelData.label
                                                 color: modelData.c
                                                 font.bold: modelData.label === "N"
-                                                font.pixelSize: 10
+                                                font.pointSize: root.fontPointSize(10)
                                             }
                                         }
                                         QGCColoredImage {
@@ -1284,7 +1435,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     acceptedButtons: Qt.NoButton
-                                    onContainsMouseChanged: containsMouse ? root.showFloatingToolTip(this, tr("Compass: displays the selected vehicle heading; 0/360 degrees points north."), "left") : root.hideFloatingToolTip()
+                                    onContainsMouseChanged: containsMouse ? root.showFloatingToolTip(this, tr("指南针：显示所选无人机航向，0°/360° 表示正北。"), "left") : root.hideFloatingToolTip()
                                 }
                             }
                         }
@@ -1302,11 +1453,11 @@ function escFact(vehicle, prefix, motorIndex) {
                                 spacing: 6
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    QGCLabel { Layout.fillWidth: true; text: tr("IMU / 振动"); color: qgcPal.text; font.bold: true; font.pixelSize: 13 }
+                                    QGCLabel { Layout.fillWidth: true; text: tr("IMU / 振动"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(13) }
                                     QGCLabel {
                                         text: root.rightVehicle && root.rightVehicle.vibration ? tr("实时三轴") : tr("等待数据")
                                         color: root.rightVehicle && root.rightVehicle.vibration ? root.nominal : root.muted
-                                        font.pixelSize: 10
+                                        font.pointSize: root.fontPointSize(10)
                                     }
                                 }
                                 RowLayout {
@@ -1315,9 +1466,9 @@ function escFact(vehicle, prefix, motorIndex) {
                                     spacing: 6
                                     Repeater {
                                         model: [
-                                            { label: "X", axis: "xAxis", tip: tr("X-axis vibration: lateral vibration level for spotting IMU or frame anomalies.") },
-                                            { label: "Y", axis: "yAxis", tip: tr("Y-axis vibration: longitudinal vibration level for spotting IMU or frame anomalies.") },
-                                            { label: "Z", axis: "zAxis", tip: tr("Z-axis vibration: vertical vibration level for spotting propeller, motor, or mounting resonance.") }
+                                            { label: "X", axis: "xAxis", tip: tr("X 轴振动：横向振动水平，用于发现 IMU 或机架异常。") },
+                                            { label: "Y", axis: "yAxis", tip: tr("Y 轴振动：纵向振动水平，用于发现 IMU 或机架异常。") },
+                                            { label: "Z", axis: "zAxis", tip: tr("Z 轴振动：垂向振动水平，用于发现桨叶、电机或安装共振。") }
                                         ]
                                         Rectangle {
                                             Layout.fillWidth: true
@@ -1328,8 +1479,8 @@ function escFact(vehicle, prefix, motorIndex) {
                                             Column {
                                                 anchors.centerIn: parent
                                                 spacing: 3
-                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: root.accent; font.bold: true; font.pixelSize: 13 }
-                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: root.vibrationAxisTextFor(root.rightVehicle, modelData.axis); color: qgcPal.text; font.bold: true; font.pixelSize: 14 }
+                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: root.accent; font.bold: true; font.pointSize: root.fontPointSize(13) }
+                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: root.vibrationAxisTextFor(root.rightVehicle, modelData.axis); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(14) }
                                                 Rectangle {
                                                     anchors.horizontalCenter: parent.horizontalCenter
                                                     width: Math.max(34, parent.width * 0.45)
@@ -1337,7 +1488,7 @@ function escFact(vehicle, prefix, motorIndex) {
                                                     radius: 2
                                                     color: root.rightVehicle && root.rightVehicle.vibration ? root.accent : root.mutedLine
                                                 }
-                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("vibe"); color: qgcPal.colorGrey; font.pixelSize: 9 }
+                                                QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("振动"); color: qgcPal.colorGrey; font.pointSize: root.fontPointSize(9) }
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -1354,53 +1505,114 @@ function escFact(vehicle, prefix, motorIndex) {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    QGCLabel { Layout.fillWidth: true; text: tr("视频监控预留区"); color: qgcPal.text; font.bold: true; font.pixelSize: 15 }
-                    QGCLabel { text: "16:9"; color: root.accent; font.bold: true; font.pixelSize: 12 }
+                    QGCLabel { Layout.fillWidth: true; text: tr("视频监控"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(15) }
+                    QGCLabel { text: "16:9"; color: root.accent; font.bold: true; font.pointSize: root.fontPointSize(12) }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(240, Math.max(150, (rightPanel.width - 24) * 9 / 16))
+                    Layout.preferredHeight: rightContent.width * 9 / 16
                     radius: 8
                     color: qgcPal.windowShadeDark
                     border.color: root.accent
                     border.width: 1
-                    Rectangle { anchors.fill: parent; anchors.margins: 6; radius: 6; color: "transparent"; border.color: root.mutedLine }
+
+                    Item {
+                        id: videoViewport
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        clip: true
+                    }
+
+                    Rectangle {
+                        anchors.fill: videoViewport
+                        radius: 6
+                        color: "transparent"
+                        border.color: root.mutedLine
+                        z: 2
+                    }
+
                     Column {
                         anchors.centerIn: parent
                         spacing: 8
+                        visible: !QGroundControl.videoManager.hasVideo
+                        z: 1
                         QGCColoredImage { anchors.horizontalCenter: parent.horizontalCenter; width: 44; height: 44; source: "/qmlimages/camera_video.svg"; color: root.muted }
-                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("16:9 视频画面区域"); color: qgcPal.text; font.bold: true; font.pixelSize: 15 }
-                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("后续接入 4G 链路视频流 / 吊舱画面"); color: qgcPal.colorGrey; font.pixelSize: 11 }
+                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("16:9 视频画面区域"); color: qgcPal.text; font.bold: true; font.pointSize: root.fontPointSize(15) }
+                        QGCLabel { anchors.horizontalCenter: parent.horizontalCenter; text: tr("后续接入 4G 链路视频流 / 吊舱画面"); color: qgcPal.colorGrey; font.pointSize: root.fontPointSize(11) }
                     }
-                    QGCLabel { anchors.left: parent.left; anchors.leftMargin: 12; anchors.bottom: parent.bottom; anchors.bottomMargin: 8; text: tr("VIDEO · STANDBY"); color: root.muted; font.pixelSize: 10 }
+
+                    QGCLabel {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 12
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 8
+                        text: QGroundControl.videoManager.recording ? tr("VIDEO · REC") :
+                              (QGroundControl.videoManager.decoding ? tr("VIDEO · LIVE") : tr("VIDEO · STANDBY"))
+                        color: QGroundControl.videoManager.recording ? qgcPal.colorRed :
+                               (QGroundControl.videoManager.decoding ? root.nominal : root.muted)
+                        font.pointSize: root.fontPointSize(10)
+                        z: 3
+                    }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    spacing: 6
+
                     QGCButton {
                         id: videoRecordButton
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
-                        text: (QGroundControl.videoManager && QGroundControl.videoManager.recording ? tr("停止录制") : tr("● 录制"))
+                        Layout.preferredHeight: 32
+                        text: QGroundControl.videoManager.recording ? tr("停止录像") : tr("录像")
+                        iconSource: "/qmlimages/camera_video.svg"
+                        iconLeft: true
+                        pointSize: ScreenTools.smallFontPointSize
+                        backRadius: 4
+                        primary: QGroundControl.videoManager.recording
+                        enabled: QGroundControl.videoManager.streaming || QGroundControl.videoManager.recording
                         onHoveredChanged: {
-                            if (hovered) root.showFloatingToolTip(videoRecordButton, tr("开始或停止视频流录制"), "right")
+                            if (hovered) root.showFloatingToolTip(videoRecordButton,
+                                                                 QGroundControl.videoManager.recording ? tr("停止并保存当前视频录像") : tr("将当前视频流录制到本地"),
+                                                                 "right")
                             else root.hideFloatingToolTip()
                         }
                         onClicked: {
                             root.hideFloatingToolTip()
-                            if (QGroundControl.videoManager) {
-                                if (QGroundControl.videoManager.recording) QGroundControl.videoManager.stopRecording()
-                                else QGroundControl.videoManager.startRecording()
-                            }
+                            if (QGroundControl.videoManager.recording) QGroundControl.videoManager.stopRecording()
+                            else QGroundControl.videoManager.startRecording()
                         }
                     }
+
+                    QGCButton {
+                        id: videoPhotoButton
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        text: tr("拍照")
+                        iconSource: "/qmlimages/camera_photo.svg"
+                        iconLeft: true
+                        pointSize: ScreenTools.smallFontPointSize
+                        backRadius: 4
+                        enabled: QGroundControl.videoManager.decoding
+                        onHoveredChanged: {
+                            if (hovered) root.showFloatingToolTip(videoPhotoButton, tr("保存当前视频画面截图"), "right")
+                            else root.hideFloatingToolTip()
+                        }
+                        onClicked: {
+                            root.hideFloatingToolTip()
+                            QGroundControl.videoManager.grabImage()
+                        }
+                    }
+
                     QGCButton {
                         id: videoSettingsButton
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
+                        Layout.preferredHeight: 32
                         text: tr("视频设置")
+                        iconSource: "/res/gear-black.svg"
+                        iconLeft: true
+                        pointSize: ScreenTools.smallFontPointSize
+                        backRadius: 4
                         onHoveredChanged: {
                             if (hovered) root.showFloatingToolTip(videoSettingsButton, tr("打开应用设置中的视频配置"), "right")
                             else root.hideFloatingToolTip()
@@ -1534,12 +1746,24 @@ function escFact(vehicle, prefix, motorIndex) {
 
     MerivusToolTip {
         id: floatingToolTip
-        property real anchorX: 0
-        property real anchorY: 0
+        property real sourceX: 0
+        property real sourceY: 0
+        property real sourceWidth: 0
+        property real sourceHeight: 0
         property string align: "right"
 
         z: 1000000
-        x: root.clamp(align === "right" ? anchorX - width : anchorX, 0, Math.max(0, root.width - width))
-        y: root.clamp(anchorY, 0, Math.max(0, root.height - height))
+        x: {
+            var gap = 8
+            var preferred = align === "left" ? sourceX - width - gap : sourceX + sourceWidth + gap
+            var alternate = align === "left" ? sourceX + sourceWidth + gap : sourceX - width - gap
+            var fits = preferred >= root.margin && preferred + width <= root.width - root.margin
+            return root.clamp(fits ? preferred : alternate,
+                              root.margin,
+                              Math.max(root.margin, root.width - width - root.margin))
+        }
+        y: root.clamp(sourceY + (sourceHeight - height) / 2,
+                      root.margin,
+                      Math.max(root.margin, root.height - height - root.margin))
     }
 }

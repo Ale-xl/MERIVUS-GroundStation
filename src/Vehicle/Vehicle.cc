@@ -110,6 +110,7 @@ const char* Vehicle::_distanceSensorFactGroupName =     "distanceSensor";
 const char* Vehicle::_localPositionFactGroupName =      "localPosition";
 const char* Vehicle::_localPositionSetpointFactGroupName ="localPositionSetpoint";
 const char* Vehicle::_escStatusFactGroupName =          "escStatus";
+const char* Vehicle::_ftcStatusFactGroupName =          "ftcStatus";
 const char* Vehicle::_estimatorStatusFactGroupName =    "estimatorStatus";
 const char* Vehicle::_terrainFactGroupName =            "terrain";
 const char* Vehicle::_hygrometerFactGroupName =         "hygrometer";
@@ -176,6 +177,7 @@ Vehicle::Vehicle(LinkInterface*             link,
     , _localPositionFactGroup       (this)
     , _localPositionSetpointFactGroup(this)
     , _escStatusFactGroup           (this)
+    , _ftcStatusFactGroup           (this)
     , _estimatorStatusFactGroup     (this)
     , _hygrometerFactGroup          (this)
     , _generatorFactGroup           (this)
@@ -467,6 +469,7 @@ void Vehicle::_commonInit()
     _addFactGroup(&_localPositionFactGroup,     _localPositionFactGroupName);
     _addFactGroup(&_localPositionSetpointFactGroup,_localPositionSetpointFactGroupName);
     _addFactGroup(&_escStatusFactGroup,         _escStatusFactGroupName);
+    _addFactGroup(&_ftcStatusFactGroup,         _ftcStatusFactGroupName);
     _addFactGroup(&_estimatorStatusFactGroup,   _estimatorStatusFactGroupName);
     _addFactGroup(&_hygrometerFactGroup,        _hygrometerFactGroupName);
     _addFactGroup(&_generatorFactGroup,         _generatorFactGroupName);
@@ -1688,13 +1691,15 @@ EventHandler& Vehicle::_eventHandler(uint8_t compid)
         connect(eventHandler.data(), &EventHandler::healthAndArmingChecksUpdated, this, [compid, this]() {
             const QSharedPointer<EventHandler>& eventHandler = _events[compid];
             _healthAndArmingCheckReport.update(compid, eventHandler->healthAndArmingCheckResults(),
-                    eventHandler->getModeGroup(_has_custom_mode_user_intention ? _custom_mode_user_intention : _custom_mode));
+                    eventHandler->getModeGroup(_has_custom_mode_user_intention ? _custom_mode_user_intention : _custom_mode),
+                    true);
         });
         connect(this, &Vehicle::flightModeChanged, this, [compid, this]() {
             const QSharedPointer<EventHandler>& eventHandler = _events[compid];
             if (eventHandler->healthAndArmingCheckResultsValid()) {
                 _healthAndArmingCheckReport.update(compid, eventHandler->healthAndArmingCheckResults(),
-                                                   eventHandler->getModeGroup(_has_custom_mode_user_intention ? _custom_mode_user_intention : _custom_mode));
+                                                   eventHandler->getModeGroup(_has_custom_mode_user_intention ? _custom_mode_user_intention : _custom_mode),
+                                                   false);
             }
         });
     }
@@ -2735,6 +2740,16 @@ void Vehicle::guidedModeTakeoff(double altitudeRelative)
 double Vehicle::minimumTakeoffAltitude()
 {
     return _firmwarePlugin->minimumTakeoffAltitude(this);
+}
+
+double Vehicle::guidedTakeoffSpeed()
+{
+    return _firmwarePlugin->guidedTakeoffSpeed(this);
+}
+
+bool Vehicle::setGuidedTakeoffSpeed(double metersSecond)
+{
+    return _firmwarePlugin->setGuidedTakeoffSpeed(this, metersSecond);
 }
 
 double Vehicle::maximumHorizontalSpeedMultirotor()

@@ -38,6 +38,7 @@
 #include "VehicleTemperatureFactGroup.h"
 #include "VehicleVibrationFactGroup.h"
 #include "VehicleEscStatusFactGroup.h"
+#include "VehicleFtcStatusFactGroup.h"
 #include "VehicleEstimatorStatusFactGroup.h"
 #include "VehicleHygrometerFactGroup.h"
 #include "VehicleLinkManager.h"
@@ -319,6 +320,7 @@ public:
     Q_PROPERTY(FactGroup*           clock           READ clockFactGroup             CONSTANT)
     Q_PROPERTY(FactGroup*           setpoint        READ setpointFactGroup          CONSTANT)
     Q_PROPERTY(FactGroup*           escStatus       READ escStatusFactGroup         CONSTANT)
+    Q_PROPERTY(FactGroup*           ftcStatus       READ ftcStatusFactGroup         CONSTANT)
     Q_PROPERTY(FactGroup*           estimatorStatus READ estimatorStatusFactGroup   CONSTANT)
     Q_PROPERTY(FactGroup*           terrain         READ terrainFactGroup           CONSTANT)
     Q_PROPERTY(FactGroup*           distanceSensors READ distanceSensorFactGroup    CONSTANT)
@@ -363,6 +365,12 @@ public:
 
     /// @return The minimum takeoff altitude (relative) for guided takeoff.
     Q_INVOKABLE double minimumTakeoffAltitude();
+
+    /// @return The configured guided takeoff climb speed, or NAN when unsupported.
+    Q_INVOKABLE double guidedTakeoffSpeed();
+
+    /// Queue a firmware-specific guided takeoff climb speed parameter write.
+    Q_INVOKABLE bool setGuidedTakeoffSpeed(double metersSecond);
 
     /// @return Maximum horizontal speed multirotor.
     Q_INVOKABLE double maximumHorizontalSpeedMultirotor();
@@ -716,6 +724,7 @@ public:
     FactGroup* localPositionFactGroup       () { return &_localPositionFactGroup; }
     FactGroup* localPositionSetpointFactGroup() { return &_localPositionSetpointFactGroup; }
     FactGroup* escStatusFactGroup           () { return &_escStatusFactGroup; }
+    FactGroup* ftcStatusFactGroup           () { return &_ftcStatusFactGroup; }
     FactGroup* estimatorStatusFactGroup     () { return &_estimatorStatusFactGroup; }
     FactGroup* terrainFactGroup             () { return &_terrainFactGroup; }
     FactGroup* hygrometerFactGroup          () { return &_hygrometerFactGroup; }
@@ -1424,6 +1433,7 @@ private:
     VehicleLocalPositionFactGroup   _localPositionFactGroup;
     VehicleLocalPositionSetpointFactGroup _localPositionSetpointFactGroup;
     VehicleEscStatusFactGroup       _escStatusFactGroup;
+    VehicleFtcStatusFactGroup       _ftcStatusFactGroup;
     VehicleEstimatorStatusFactGroup _estimatorStatusFactGroup;
     VehicleHygrometerFactGroup      _hygrometerFactGroup;
     VehicleGeneratorFactGroup       _generatorFactGroup;
@@ -1484,6 +1494,7 @@ private:
     static const char* _localPositionFactGroupName;
     static const char* _localPositionSetpointFactGroupName;
     static const char* _escStatusFactGroupName;
+    static const char* _ftcStatusFactGroupName;
     static const char* _estimatorStatusFactGroupName;
     static const char* _hygrometerFactGroupName;
     static const char* _generatorFactGroupName;

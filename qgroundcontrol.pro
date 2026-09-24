@@ -41,7 +41,9 @@ MacBuild {
     QMAKE_INFO_PLIST    = Custom-Info.plist
     ICON                = $${SOURCE_DIR}/resources/icons/macx.icns
     OTHER_FILES        += Custom-Info.plist
-    LIBS               += -framework ApplicationServices
+    QMAKE_FRAMEWORKPATH += $$PWD/libs/Frameworks
+    INCLUDEPATH         += $$PWD/libs/Frameworks/SDL2.framework/Headers
+    LIBS                += -framework ApplicationServices -framework SDL2
 }
 
 LinuxBuild {
@@ -434,6 +436,7 @@ HEADERS += \
     src/QmlControls/CustomActionManager.h \
     src/QmlControls/QmlUnitsConversion.h \
     src/Vehicle/VehicleEscStatusFactGroup.h \
+    src/Vehicle/VehicleFtcStatusFactGroup.h \
     src/api/QGCCorePlugin.h \
     src/api/QGCOptions.h \
     src/api/QGCSettings.h \
@@ -448,6 +451,7 @@ contains (DEFINES, QGC_ENABLE_PAIRING) {
 SOURCES += \
     src/QmlControls/CustomActionManager.cc \
     src/Vehicle/VehicleEscStatusFactGroup.cc \
+    src/Vehicle/VehicleFtcStatusFactGroup.cc \
     src/api/QGCCorePlugin.cc \
     src/api/QGCOptions.cc \
     src/api/QGCSettings.cc \

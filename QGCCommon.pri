@@ -169,7 +169,7 @@ VERSION         = 0.0.0   # Marker to indicate out-of-tree build
 MAC_VERSION     = 0.0.0
 MAC_BUILD       = 0
 exists ($$PWD/.git) {
-    GIT_DESCRIBE = $$system(git --git-dir $$PWD/.git --work-tree $$PWD describe --always --tags)
+    GIT_DESCRIBE = $$system(git --git-dir $$PWD/.git --work-tree $$PWD describe --always --tags --match v[0-9]*)
     GIT_BRANCH   = $$system(git --git-dir $$PWD/.git --work-tree $$PWD rev-parse --abbrev-ref HEAD)
     GIT_HASH     = $$system(git --git-dir $$PWD/.git --work-tree $$PWD rev-parse --short HEAD)
     GIT_TIME     = $$system(git --git-dir $$PWD/.git --work-tree $$PWD show --oneline --format=\"%ci\" -s HEAD)
@@ -181,7 +181,31 @@ exists ($$PWD/.git) {
         APP_VERSION_STR = $${GIT_DESCRIBE}
         VERSION         = $$replace(GIT_DESCRIBE, "v", "")
         VERSION         = $$replace(VERSION, "-", ".")
-        VERSION         = $$section(VERSION, ".", 0, 3)
+        contains(GIT_DESCRIBE, ^v[0-9]+.[0-9]+.[0-9]+-dev.[0-9]+.*) {
+            VERSION_MAJOR       = $$section(VERSION, ".", 0, 0)
+            VERSION_MINOR       = $$section(VERSION, ".", 1, 1)
+            VERSION_PATCH       = $$section(VERSION, ".", 2, 2)
+            PRERELEASE_NUMBER   = $$section(VERSION, ".", 4, 4)
+            COMMITS_SINCE_TAG   = $$section(VERSION, ".", 5, 5)
+
+            equals(COMMITS_SINCE_TAG, "") {
+                COMMITS_SINCE_TAG = 0
+            }
+            greaterThan(PRERELEASE_NUMBER, 9) {
+                error(Prerelease version larger than 1 digit: $${PRERELEASE_NUMBER})
+            }
+            greaterThan(COMMITS_SINCE_TAG, 99) {
+                error(Commits since prerelease tag larger than 2 digits: $${COMMITS_SINCE_TAG})
+            }
+            lessThan(COMMITS_SINCE_TAG, 10) {
+                COMMITS_SINCE_TAG = $$join(COMMITS_SINCE_TAG, "", "0")
+            }
+
+            DEV_VERSION = $${PRERELEASE_NUMBER}$${COMMITS_SINCE_TAG}
+            VERSION = $${VERSION_MAJOR}.$${VERSION_MINOR}.$${VERSION_PATCH}.$${DEV_VERSION}
+        } else {
+            VERSION = $$section(VERSION, ".", 0, 3)
+        }
     }
 
     DailyBuild {

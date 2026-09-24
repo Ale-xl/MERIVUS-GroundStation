@@ -104,25 +104,27 @@ Item {
     Component {
         id: promptForPlanUsageOnVehicleChangePopupComponent
         QGCPopupDialog {
-            title:      _planMasterController.managerVehicle.isOfflineEditingVehicle ? qsTr("Plan View - Vehicle Disconnected") : qsTr("Plan View - Vehicle Changed")
+            title:      _planMasterController.managerVehicle.isOfflineEditingVehicle ? qsTr("任务编辑车辆已断开") : qsTr("切换任务编辑目标")
             buttons:    StandardButton.NoButton
 
             ColumnLayout {
+                spacing: ScreenTools.defaultFontPixelHeight
+
                 QGCLabel {
                     Layout.maximumWidth:    parent.width
                     wrapMode:               QGCLabel.WordWrap
                     text:                   _planMasterController.managerVehicle.isOfflineEditingVehicle ?
-                                                qsTr("The vehicle associated with the plan in the Plan View is no longer available. What would you like to do with that plan?") :
-                                                qsTr("The plan being worked on in the Plan View is not from the current vehicle. What would you like to do with that plan?")
+                                                qsTr("当前任务编辑方案关联的无人机已经断开。请选择保留离线草稿，或放弃未保存修改。") :
+                                                qsTr("任务编辑器中存在上一架无人机尚未保存或上传的修改。切换目标前需要确认如何处理这些修改。")
                 }
 
                 QGCLabel {
                     Layout.maximumWidth:    parent.width
                     wrapMode:               QGCLabel.WordWrap
                     visible:                !_planMasterController.managerVehicle.isOfflineEditingVehicle
-                    text:                   qsTr("当前目标为 UAV-%1。每架无人机已上传到飞控的任务彼此独立；若要查看或编辑该机自己的任务，请从车辆加载。保留当前方案会把上一份编辑草稿带到当前车辆上下文，之后上传可能覆盖该机任务。")
+                    text:                   qsTr("当前目标为 UAV-%1。切换车辆不会继承上一架无人机的编辑方案；继续后只加载该机自己的当前任务。原车辆正在执行的任务不会因此中断。")
                                                 .arg(_planMasterController.managerVehicle.id)
-                    color:                  qgcPal.warningText
+                    color:                  qgcPal.buttonHighlight
                     font.pointSize:         ScreenTools.smallFontPointSize
                 }
 
@@ -130,9 +132,9 @@ Item {
                     Layout.fillWidth:   true
                     text:               _planMasterController.dirty ?
                                             (_planMasterController.managerVehicle.isOfflineEditingVehicle ?
-                                                 qsTr("Discard Unsaved Changes") :
-                                                 qsTr("Discard Unsaved Changes, Load New Plan From Vehicle")) :
-                                            qsTr("Load New Plan From Vehicle")
+                                                 qsTr("放弃未保存修改") :
+                                                 qsTr("放弃未保存修改并加载当前无人机方案")) :
+                                            qsTr("加载当前无人机方案")
                     onClicked: {
                         _planMasterController.showPlanFromManagerVehicle()
                         _promptForPlanUsageShowing = false
@@ -142,13 +144,9 @@ Item {
 
                 QGCButton {
                     Layout.fillWidth:   true
-                    text:               _planMasterController.managerVehicle.isOfflineEditingVehicle ?
-                                            qsTr("Keep Current Plan") :
-                                            qsTr("Keep Current Plan, Don't Update From Vehicle")
+                    visible:            _planMasterController.managerVehicle.isOfflineEditingVehicle
+                    text:               qsTr("保留当前离线方案")
                     onClicked: {
-                        if (!_planMasterController.managerVehicle.isOfflineEditingVehicle) {
-                            _planMasterController.dirty = true
-                        }
                         _promptForPlanUsageShowing = false
                         close()
                     }

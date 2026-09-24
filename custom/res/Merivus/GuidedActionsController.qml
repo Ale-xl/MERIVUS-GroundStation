@@ -37,6 +37,11 @@ Item {
     property var guidedValueSlider
     property var orbitMapCircle
     property var selectedVehicleIds: []
+    property real defaultTakeoffAltitudeMeters: 10
+    readonly property bool swarmModeEnabled: _swarm.swarmModeEnabled
+    readonly property bool formationActive: _swarm.formationActive
+    readonly property bool formationBusy: _swarm.formationBusy
+    readonly property string formationStatus: _swarm.formationStatus
 
     readonly property string emergencyStopTitle:            qsTr("EMERGENCY STOP")
     readonly property string armTitle:                      qsTr("Arm")
@@ -63,7 +68,9 @@ Item {
     readonly property string roiTitle:                      qsTr("ROI")
     readonly property string setHomeTitle:                  qsTr("Set Home")
     readonly property string actionListTitle:               qsTr("Action")
-    readonly property string swarmTitle:                   qsTr("编队任务")
+    readonly property string swarmTitle:                   qsTr("编队验证任务")
+    readonly property string endSwarmTitle:                qsTr("结束编队")
+    readonly property string queuedMissionTitle:           qsTr("实时航点队列")
 
     readonly property string armMessage:                        qsTr("Arm the vehicle.")
     readonly property string forceArmMessage:                   qsTr("WARNING: This will force arming of the vehicle bypassing any safety checks.")
@@ -89,7 +96,8 @@ Item {
     readonly property string vtolTransitionMRMessage:           qsTr("Transition VTOL to multi-rotor flight.")
     readonly property string roiMessage:                        qsTr("Make the specified location a Region Of Interest.")
     readonly property string setHomeMessage:                    qsTr("Set vehicle home as the specified location. This will affect Return to Home position")
-    readonly property string swarmMessage:                     qsTr("让框选无人机分别启动各自已上传的机载任务。")
+    readonly property string swarmMessage:                     qsTr("按 PREPARE、COMMIT、RELEASE 三阶段启动所选 1/2/6 机；任一成员失败会自动向整组下发 ABORT。")
+    readonly property string endSwarmMessage:                  qsTr("向当前会话成员下发 ABORT、停止位置租约，并等待成员进入悬停。")
 
     readonly property int actionRTL:                        1
     readonly property int actionLand:                       2
@@ -119,6 +127,8 @@ Item {
     readonly property int actionGripper:                    26
     readonly property int actionSetHome:                    27
     readonly property int actionSwarm:                      28
+    readonly property int actionEndSwarm:                   29
+    readonly property int actionQueuedMission:              30
 
     property var    _activeVehicle:             QGroundControl.multiVehicleManager.activeVehicle
     property bool   _useChecklist:              QGroundControl.settingsManager.appSettings.useChecklist.rawValue && QGroundControl.corePlugin.options.preFlightChecklistUrl.toString().length
@@ -146,7 +156,7 @@ Item {
     property bool showLandAbort:        _guidedActionsEnabled && _vehicleFlying && _fixedWingOnApproach
     property bool showGotoLocation:     _guidedActionsEnabled && _vehicleFlying
     property bool showSetHome:          _guidedActionsEnabled
-    property bool showActionList:       _guidedActionsEnabled && (showStartMission || showResumeMission || showChangeAlt || showLandAbort || actionList.hasCustomActions)
+    property bool showActionList:       _guidedActionsEnabled && (showStartMission || showContinueMission || showResumeMission || showChangeAlt || showLandAbort || actionList.hasCustomActions)
     property bool showGripper:          _initialConnectComplete ? _activeVehicle.hasGripper : false
     property string changeSpeedTitle:   _fixedWing ? changeAirspeedTitle : changeCruiseSpeedTitle
     property string changeSpeedMessage: _fixedWing ? changeAirspeedMessage : changeCruiseSpeedMessage
@@ -196,6 +206,7 @@ Item {
     }
 
     function _snapshotVehicleIds(ids) {
+        // 冻结确认时的目标，避免对话框停留期间的 UI 选择变化扩大或替换执行范围。
         var snapshot = []
         if (!ids || ids.length === undefined) return snapshot
         for (var i = 0; i < ids.length; i++) snapshot.push(Number(ids[i]))
@@ -203,7 +214,7 @@ Item {
     }
 
     function _vehicleIdsText(ids) {
-        return ids && ids.length > 0 ? ids.join(", ") : "--"
+        return ids && ids.length > 0 ? ids.join(", UAV-") : "--"
     }
 
     function _takeoffMinimumForTargets(ids) {
@@ -243,7 +254,7 @@ Item {
         if (actionCode === actionTakeoff) {
                 var takeoffMinimum = _takeoffMinimumForTargets(_actionData)
                 guidedValueSlider.setMinVal(takeoffMinimum)
-                guidedValueSlider.setValue(takeoffMinimum)
+                guidedValueSlider.setValue(Math.max(takeoffMinimum, defaultTakeoffAltitudeMeters))
                 guidedValueSlider.setDisplayText("Height")
         } else if (actionCode === actionChangeSpeed) {
             guidedValueSlider.setIsSpeedSlider(true)
@@ -308,9 +319,6 @@ Item {
             console.log("showContinueMission", showContinueMission)
         }
         _outputState()
-        if (showContinueMission) {
-            confirmAction(actionContinueMission)
-        }
     }
     onShowRTLChanged: {
         if (_corePlugin.guidedActionsControllerLogging()) {
@@ -372,6 +380,13 @@ Item {
     }
 
     Connections {
+        target: _swarm
+        function onFormationFault(message) {
+            mainWindow.showMessageDialog(qsTr("编队异常"), message)
+        }
+    }
+
+    Connections {
         target:                             mainWindow
         function onArmVehicleRequest() { armVehicleRequest() }
         function onForceArmVehicleRequest() { forceArmVehicleRequest() }
@@ -406,12 +421,16 @@ Item {
     }
 
     function closeAll() {
-        confirmDialog.visible =     false
+        if (confirmDialog && (confirmDialog.visible || confirmDialog.mapIndicator)) {
+            confirmDialog.confirmCancelled()
+        } else if (confirmDialog) {
+            confirmDialog.visible = false
+        }
         actionList.visible =        false
         guidedValueSlider.visible =    false
     }
 
-    // Called when an action is about to be executed in order to confirm
+    // 所有 MERIVUS 批量动作先在这里冻结目标并进入人工确认；确认内容与执行数据同源。
     function confirmAction(actionCode, actionData, mapIndicator) {
         var showImmediate = true
         closeAll()
@@ -421,7 +440,8 @@ Item {
         confirmDialog.optionText = ""
 
         var frozenActionData = actionData
-        if (actionCode === actionTakeoff || actionCode === actionSwarm) {
+        if (actionCode === actionTakeoff || actionCode === actionLand
+                || actionCode === actionRTL || actionCode === actionSwarm) {
             frozenActionData = actionData && actionData.length !== undefined
                     ? _snapshotVehicleIds(actionData)
                     : _snapshotVehicleIds(selectedVehicleIds)
@@ -482,7 +502,6 @@ Item {
             confirmDialog.hideTrigger = true
             break;
         case actionContinueMission:
-            showImmediate = false
             confirmDialog.title = continueMissionTitle
             confirmDialog.message = continueMissionMessage
             confirmDialog.hideTrigger = Qt.binding(function() { return !showContinueMission })
@@ -497,17 +516,29 @@ Item {
             break;
         case actionLand:
             confirmDialog.title = landTitle
-            confirmDialog.message = landMessage
-            confirmDialog.hideTrigger = Qt.binding(function() { return !showLand })
+            if (_actionData && _actionData.length > 1) {
+                confirmDialog.message = qsTr("让框选的 %1 架无人机在当前位置降落。\n目标：UAV-%2")
+                                                .arg(_actionData.length).arg(_vehicleIdsText(_actionData))
+                confirmDialog.hideTrigger = true
+            } else {
+                confirmDialog.message = landMessage
+                confirmDialog.hideTrigger = Qt.binding(function() { return !showLand })
+            }
             break;
         case actionRTL:
             confirmDialog.title = rtlTitle
-            confirmDialog.message = rtlMessage
-            if (_activeVehicle.supportsSmartRTL) {
-                confirmDialog.optionText = qsTr("Smart RTL")
-                confirmDialog.optionChecked = false
+            if (_actionData && _actionData.length > 1) {
+                confirmDialog.message = qsTr("让框选的 %1 架无人机分别返回各自起飞点。\n目标：UAV-%2\n批量返航统一使用标准 RTL。")
+                                                .arg(_actionData.length).arg(_vehicleIdsText(_actionData))
+                confirmDialog.hideTrigger = true
+            } else {
+                confirmDialog.message = rtlMessage
+                if (_activeVehicle.supportsSmartRTL) {
+                    confirmDialog.optionText = qsTr("Smart RTL")
+                    confirmDialog.optionChecked = false
+                }
+                confirmDialog.hideTrigger = Qt.binding(function() { return !showRTL })
             }
-            confirmDialog.hideTrigger = Qt.binding(function() { return !showRTL })
             break;
         case actionChangeAlt:
             confirmDialog.title = changeAltTitle
@@ -582,13 +613,42 @@ Item {
             confirmDialog.hideTrigger = Qt.binding(function() { return !showSetHome })
             break
         case actionSwarm:
-            if (!_actionData || _actionData.length < 2) {
-                mainWindow.showMessageDialog(qsTr("无法启动编队任务"), qsTr("请先在地图或机群列表中框选至少两架无人机。"))
+            var formationIds = _actionData ? _actionData.slice(0).sort(function(a, b) { return a - b }) : []
+            var validCount = formationIds.length === 1 || formationIds.length === 2 || formationIds.length === 6
+            var validLeader = formationIds.length > 0 && Number(formationIds[0]) === 1
+            var validSix = formationIds.length !== 6 || formationIds.join(",") === "1,2,3,4,5,6"
+            if (!validCount || !validLeader || !validSix) {
+                mainWindow.showMessageDialog(qsTr("无法启动编队"), qsTr("请选择包含 UAV-1 的单机、双机或完整 UAV-1～UAV-6。"))
                 return
             }
             confirmDialog.title = swarmTitle
-            confirmDialog.message = swarmMessage + "\n" + qsTr("目标：UAV-%1").arg(_vehicleIdsText(_actionData))
+            confirmDialog.message = swarmMessage
+                    + "\n" + qsTr("主机：UAV-1")
+                    + "\n" + qsTr("成员：UAV-%1").arg(formationIds.join("、UAV-"))
+                    + "\n" + (swarmModeEnabled ? qsTr("编队协议：已启用") : qsTr("编队协议：未启用，确认后不会发送"))
             confirmDialog.hideTrigger =true
+            break
+        case actionEndSwarm:
+            if (!formationActive && !formationBusy) {
+                mainWindow.showMessageDialog(qsTr("无法结束编队"), qsTr("当前没有活动的编队事务。"))
+                return
+            }
+            confirmDialog.title = endSwarmTitle
+            confirmDialog.message = endSwarmMessage
+            confirmDialog.hideTrigger = true
+            break
+        case actionQueuedMission:
+            if (!_actionData || !_actionData.vehicleIds || _actionData.vehicleIds.length === 0
+                    || !_actionData.waypointCount) {
+                return
+            }
+            confirmDialog.title = queuedMissionTitle
+            confirmDialog.message = qsTr("目标：UAV-%1\n航点数：%2\n%3")
+                    .arg(_vehicleIdsText(_actionData.vehicleIds))
+                    .arg(_actionData.waypointCount)
+                    .arg(_actionData.replacementRequired
+                         ? qsTr("目标中存在正在执行或未清理的任务；确认后将悬停并替换该任务。")
+                         : qsTr("确认后上传并执行本次临时任务，各机保持冻结时的相对间距。"))
             break
         default:
             console.warn("Unknown actionCode", actionCode)
@@ -597,17 +657,27 @@ Item {
         confirmDialog.show(showImmediate)
     }
 
-    // Executes the specified action
+    // 这里只执行 Guided 确认框产生的人工动作；AI Assistant 没有调用此函数的路径。
     function executeAction(actionCode, actionData, sliderOutputValue, optionChecked) {
         var i;
         var rgVehicle;
         var result;
         switch (actionCode) {
         case actionRTL:
-            _activeVehicle.guidedModeRTL(optionChecked)
+            if (actionData && actionData.length > 1) {
+                result = _swarm.executeRTL(actionData)
+                _showBatchResult(qsTr("批量返航"), result, true)
+            } else {
+                _activeVehicle.guidedModeRTL(optionChecked)
+            }
             break
         case actionLand:
-            _activeVehicle.guidedModeLand()
+            if (actionData && actionData.length > 1) {
+                result = _swarm.executeLand(actionData)
+                _showBatchResult(qsTr("批量降落"), result, true)
+            } else {
+                _activeVehicle.guidedModeLand()
+            }
             break
         case actionTakeoff:
             if (actionData && actionData.length > 0) {
@@ -694,8 +764,15 @@ Item {
             _activeVehicle.doSetHome(actionData)
             break
         case actionSwarm:
-            result = _swarm.executeStartMissions(actionData ? actionData : [])
+            result = _swarm.sendStartCommand(actionData ? actionData : [])
             _showBatchResult(qsTr("编队任务"), result, true)
+            break
+        case actionEndSwarm:
+            result = _swarm.endFormationSession()
+            _showBatchResult(qsTr("结束编队"), result, true)
+            break
+        case actionQueuedMission:
+            // The map indicator owns the frozen route and executes it after confirmation.
             break
         default:
             console.warn(qsTr("Internal error: unknown actionCode"), actionCode)
@@ -703,4 +780,3 @@ Item {
         }
     }
 }
-
