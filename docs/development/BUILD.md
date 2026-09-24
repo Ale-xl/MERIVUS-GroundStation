@@ -36,3 +36,9 @@ git diff --check
 ```
 
 有 Qt 工具链时再运行 `qmllint` 和 C++ 编译。没有对应工具时应在交付说明中写明，不能把静态脚本称为完整构建。
+
+## Linux AppImage
+
+当前 CI 在 Ubuntu 24.04 x86_64、Qt 5.15.2 下构建。`deploy/create_linux_appimage.sh` 使用同一构建环境的 SDL2 运行库和已生成的 staging；不再混入旧 Debian SDL/DirectFB 软件包。产物以 Ubuntu 24.04 的系统 ABI 为基线，不承诺兼容更旧发行版，仍需目标机器上的图形、音视频与设备访问验收。
+
+打包工具固定为 AppImageKit 12 并校验 SHA-256；通过解包运行避免依赖 CI 的 FUSE 设备。缺失输入、运行库或校验失败会中止打包。工作流同时保留 AppImage、SHA-256 和 `.build-info`（源码提交、版本、构建类型、系统、Qt、编译器、SDL2 版本和打包工具摘要）。这些信息描述实际构建，不等同于跨环境逐字节重建已经验证。
