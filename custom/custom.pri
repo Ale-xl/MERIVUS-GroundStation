@@ -47,7 +47,23 @@ SOURCES += \
     $$PWD/src/Ai/AiServiceSupervisor.cc \
     $$PWD/src/CustomPlugin.cc \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.cc \
-    $$PWD/src/Swarm/SwarmController.cc
+    $$PWD/src/Swarm/CommandTransaction.cc \
+    $$PWD/src/Swarm/FaultToleranceManager.cc \
+    $$PWD/src/Swarm/FormationPlanner.cc \
+    $$PWD/src/Swarm/FleetRegistry.cc \
+    $$PWD/src/Swarm/FleetCapabilityMatcher.cc \
+    $$PWD/src/Swarm/FleetExtensionRegistry.cc \
+    $$PWD/src/Swarm/FleetRolePolicy.cc \
+    $$PWD/src/Swarm/FleetTaskTemplateRegistry.cc \
+    $$PWD/src/Swarm/MissionHandoffManager.cc \
+    $$PWD/src/Swarm/FleetIntentTask.cc \
+    $$PWD/src/Swarm/FleetRiskRadar.cc \
+    $$PWD/src/Swarm/SwarmMissionOrchestrator.cc \
+    $$PWD/src/Swarm/VehicleCapability.cc \
+    $$PWD/src/Swarm/SwarmController.cc \
+    $$PWD/src/Swarm/FleetEventBlackBox.cc \
+    $$PWD/src/Swarm/FleetTimelineReplay.cc \
+    $$PWD/src/Swarm/FleetMissionSimulator.cc
 
 HEADERS += \
     $$PWD/src/Ai/ActionProposal.h \
@@ -58,7 +74,23 @@ HEADERS += \
     $$PWD/src/Ai/AiServiceSupervisor.h \
     $$PWD/src/CustomPlugin.h \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.h \
-    $$PWD/src/Swarm/SwarmController.h
+    $$PWD/src/Swarm/CommandTransaction.h \
+    $$PWD/src/Swarm/FaultToleranceManager.h \
+    $$PWD/src/Swarm/FormationPlanner.h \
+    $$PWD/src/Swarm/FleetRegistry.h \
+    $$PWD/src/Swarm/FleetCapabilityMatcher.h \
+    $$PWD/src/Swarm/FleetExtensionRegistry.h \
+    $$PWD/src/Swarm/FleetRolePolicy.h \
+    $$PWD/src/Swarm/FleetTaskTemplateRegistry.h \
+    $$PWD/src/Swarm/MissionHandoffManager.h \
+    $$PWD/src/Swarm/FleetIntentTask.h \
+    $$PWD/src/Swarm/FleetRiskRadar.h \
+    $$PWD/src/Swarm/SwarmMissionOrchestrator.h \
+    $$PWD/src/Swarm/VehicleCapability.h \
+    $$PWD/src/Swarm/SwarmController.h \
+    $$PWD/src/Swarm/FleetEventBlackBox.h \
+    $$PWD/src/Swarm/FleetTimelineReplay.h \
+    $$PWD/src/Swarm/FleetMissionSimulator.h
 
 INCLUDEPATH += \
     $$PWD/src \
