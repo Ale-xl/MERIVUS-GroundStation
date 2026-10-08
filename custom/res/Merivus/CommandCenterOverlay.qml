@@ -7,6 +7,7 @@ import QGroundControl.FlightDisplay 1.0
 import QGroundControl.FlightMap     1.0
 import QGroundControl.Palette       1.0
 import QGroundControl.ScreenTools   1.0
+import Merivus                      1.0
 
 Item {
     id: root
@@ -20,6 +21,7 @@ Item {
     property var activeVehicle: QGroundControl.multiVehicleManager.activeVehicle
     property var mapControl
     property var reviewController
+    property bool selfieSettingsOpen: false
     property var toolInsets
     property alias videoDockTarget: videoViewport
 
@@ -69,6 +71,11 @@ Item {
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
     FtcStatusPalette { id: ftcStatusPalette }
+    ReviewVideoController {
+        id: reviewVideoController
+        vehicle: root.focusVehicle
+        active: root.reviewController && root.reviewController.inspecting
+    }
     Timer { interval: 1000; running: root.visible; repeat: true; onTriggered: root.now = new Date() }
 
     Column {
@@ -1575,6 +1582,25 @@ function escFact(vehicle, prefix, motorIndex) {
                     }
 
                     Rectangle {
+                        anchors.fill: videoViewport
+                        color: "black"
+                        clip: true
+                        visible: root.reviewController && root.reviewController.inspecting
+                        z: 3
+
+                        Loader {
+                            anchors.fill: parent
+                            active: parent.visible && reviewVideoController.rtspUrl.length > 0
+                            sourceComponent: QGCVideoBackground {
+                                id: selfieVideoFrame
+                                anchors.fill: parent
+                                Component.onCompleted: reviewVideoController.videoItem = selfieVideoFrame
+                                Component.onDestruction: reviewVideoController.videoItem = null
+                            }
+                        }
+                    }
+
+                    Rectangle {
                         anchors.left: videoViewport.left
                         anchors.right: videoViewport.right
                         anchors.top: videoViewport.top
@@ -1602,10 +1628,10 @@ function escFact(vehicle, prefix, motorIndex) {
                         width: videoViewport.width - 20
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        text: tr("第三视角视频未连接；请在视频设置中选择自拍杆镜头流")
+                        text: reviewVideoController.statusText
                         color: "white"
                         visible: root.reviewController && root.reviewController.inspecting
-                                 && !QGroundControl.videoManager.decoding
+                                 && !reviewVideoController.decoding
                         z: 4
                     }
 
@@ -1614,7 +1640,7 @@ function escFact(vehicle, prefix, motorIndex) {
                         radius: 6
                         color: "transparent"
                         border.color: root.mutedLine
-                        z: 2
+                        z: 5
                     }
 
                     Column {
@@ -1637,13 +1663,46 @@ function escFact(vehicle, prefix, motorIndex) {
                         color: QGroundControl.videoManager.recording ? qgcPal.colorRed :
                                (QGroundControl.videoManager.decoding ? root.nominal : root.muted)
                         font.pointSize: root.fontPointSize(10)
+                        visible: !root.reviewController || !root.reviewController.inspecting
                         z: 3
                     }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
+
+                    QGCButton {
+                        text: root.selfieSettingsOpen ? tr("收起自拍杆设置") : tr("设置自拍杆 RTSP")
+                        enabled: !!root.focusVehicle
+                        onClicked: root.selfieSettingsOpen = !root.selfieSettingsOpen
+                    }
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignRight
+                        text: reviewVideoController.decoding ? tr("自拍杆直播中") :
+                              (reviewVideoController.rtspUrl.length > 0 ? tr("已配置自拍杆流") : tr("未配置自拍杆流"))
+                        color: reviewVideoController.decoding ? root.nominal : root.muted
+                    }
+                }
+
+                QGCTextField {
+                    id: selfieRtspField
+                    Layout.fillWidth: true
+                    visible: root.selfieSettingsOpen
+                    placeholderText: "rtsp://host:port/path"
+                    Component.onCompleted: text = reviewVideoController.rtspUrl
+                    onEditingFinished: reviewVideoController.rtspUrl = text
+                }
+
+                Connections {
+                    target: reviewVideoController
+                    function onRtspUrlChanged() { selfieRtspField.text = reviewVideoController.rtspUrl }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
                     spacing: 6
+                    visible: !root.reviewController || !root.reviewController.inspecting
 
                     QGCButton {
                         id: videoRecordButton

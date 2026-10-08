@@ -48,6 +48,7 @@ SOURCES += \
     $$PWD/src/CustomPlugin.cc \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.cc \
     $$PWD/src/Review/ReviewRangeController.cc \
+    $$PWD/src/Review/ReviewVideoController.cc \
     $$PWD/src/Swarm/SwarmController.cc
 
 HEADERS += \
@@ -61,6 +62,7 @@ HEADERS += \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.h \
     $$PWD/src/Review/ReviewRangeController.h \
     $$PWD/src/Review/ReviewRangeMath.h \
+    $$PWD/src/Review/ReviewVideoController.h \
     $$PWD/src/Swarm/SwarmController.h
 
 INCLUDEPATH += \
