@@ -18,6 +18,8 @@ Item {
     property var selectedIds: []
     property var vehicles: QGroundControl.multiVehicleManager.vehicles
     property var activeVehicle: QGroundControl.multiVehicleManager.activeVehicle
+    property var mapControl
+    property var reviewController
     property var toolInsets
     property alias videoDockTarget: videoViewport
 
@@ -68,6 +70,54 @@ Item {
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
     FtcStatusPalette { id: ftcStatusPalette }
     Timer { interval: 1000; running: root.visible; repeat: true; onTriggered: root.now = new Date() }
+
+    Column {
+        anchors.top: parent.top
+        anchors.topMargin: root.topInset
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(360, root.width * 0.32)
+        spacing: 5
+        z: QGroundControl.zOrderTopMost + 1
+
+        QGCButton {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.reviewController && root.reviewController.inspecting ? tr("退出检视") : tr("检视动力范围")
+            primary: root.reviewController && root.reviewController.inspecting
+            onClicked: {
+                if (!root.reviewController) return
+                if (root.reviewController.inspecting) {
+                    root.reviewController.stopInspection()
+                } else {
+                    root.reviewController.startInspection()
+                    if (root.reviewController.inspecting && root.mapControl)
+                        root.mapControl.center = root.reviewController.anchor
+                }
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: reviewStatus.implicitHeight + 12
+            radius: 6
+            color: root.panelColor
+            border.color: root.panelLine
+            visible: root.reviewController && root.reviewController.statusText.length > 0
+
+            QGCLabel {
+                id: reviewStatus
+                anchors.centerIn: parent
+                width: parent.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                color: qgcPal.text
+                text: !root.reviewController ? "" :
+                      (root.reviewController.rangeAvailable
+                       ? tr("UAV-%1 · 试算半径约 %2 m · %3").arg(root.focusVehicle ? root.focusVehicle.id : "--")
+                            .arg(Math.floor(root.reviewController.radiusMeters)).arg(root.reviewController.statusText)
+                       : root.reviewController.statusText)
+            }
+        }
+    }
 
     function tr(text) { return qsTr(text) }
     function clamp(value, minValue, maxValue) { return Math.max(minValue, Math.min(maxValue, value)) }
@@ -1522,6 +1572,41 @@ function escFact(vehicle, prefix, motorIndex) {
                         anchors.fill: parent
                         anchors.margins: 6
                         clip: true
+                    }
+
+                    Rectangle {
+                        anchors.left: videoViewport.left
+                        anchors.right: videoViewport.right
+                        anchors.top: videoViewport.top
+                        height: osdText.implicitHeight + 10
+                        color: "#b0000000"
+                        visible: root.reviewController && root.reviewController.inspecting
+                        z: 4
+
+                        QGCLabel {
+                            id: osdText
+                            anchors.centerIn: parent
+                            width: parent.width - 12
+                            color: "white"
+                            font.pointSize: root.fontPointSize(10)
+                            elide: Text.ElideRight
+                            text: tr("UAV-%1  高度 %2  地速 %3  电量 %4").arg(root.focusVehicle ? root.focusVehicle.id : "--")
+                                  .arg(root.focusVehicle ? root.numberText(root.focusVehicle.altitudeRelative, 0, "m") : "--")
+                                  .arg(root.focusVehicle ? root.numberText(root.focusVehicle.groundSpeed, 1, "m/s") : "--")
+                                  .arg(root.batteryPercent(root.focusVehicle))
+                        }
+                    }
+
+                    QGCLabel {
+                        anchors.centerIn: videoViewport
+                        width: videoViewport.width - 20
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        text: tr("第三视角视频未连接；请在视频设置中选择自拍杆镜头流")
+                        color: "white"
+                        visible: root.reviewController && root.reviewController.inspecting
+                                 && !QGroundControl.videoManager.decoding
+                        z: 4
                     }
 
                     Rectangle {

@@ -47,6 +47,7 @@ SOURCES += \
     $$PWD/src/Ai/AiServiceSupervisor.cc \
     $$PWD/src/CustomPlugin.cc \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.cc \
+    $$PWD/src/Review/ReviewRangeController.cc \
     $$PWD/src/Swarm/SwarmController.cc
 
 HEADERS += \
@@ -58,12 +59,15 @@ HEADERS += \
     $$PWD/src/Ai/AiServiceSupervisor.h \
     $$PWD/src/CustomPlugin.h \
     $$PWD/src/Diagnostics/MerivusLinkDiagnostics.h \
+    $$PWD/src/Review/ReviewRangeController.h \
+    $$PWD/src/Review/ReviewRangeMath.h \
     $$PWD/src/Swarm/SwarmController.h
 
 INCLUDEPATH += \
     $$PWD/src \
     $$PWD/src/Ai \
     $$PWD/src/Diagnostics \
+    $$PWD/src/Review \
     $$PWD/src/Swarm
 
 # Keep MSVC builds from failing on non-ASCII comments in upstream/source files.
